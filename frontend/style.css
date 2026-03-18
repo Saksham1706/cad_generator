@@ -1,0 +1,108 @@
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+  font-family: 'Segoe UI', sans-serif;
+  background: #0f0f1a;
+  color: #e0e0f0;
+  min-height: 100vh;
+  padding: 30px 16px;
+}
+
+.container {
+  max-width: 720px;
+  margin: 0 auto;
+}
+
+h1 { font-size: 28px; margin-bottom: 6px; }
+.subtitle { color: #888; margin-bottom: 24px; font-size: 14px; }
+
+.card {
+  background: #1c1c2e;
+  border: 1px solid #2e2e4e;
+  border-radius: 12px;
+  padding: 20px;
+  margin-bottom: 20px;
+}
+
+label {
+  display: block;
+  font-size: 13px;
+  color: #aaa;
+  margin-bottom: 8px;
+}
+
+textarea {
+  width: 100%;
+  background: #111125;
+  color: #e0e0f0;
+  border: 1px solid #2e2e4e;
+  border-radius: 8px;
+  padding: 12px;
+  font-size: 14px;
+  resize: vertical;
+  margin-bottom: 12px;
+}
+
+textarea:focus { outline: none; border-color: #5555ff; }
+
+button {
+  background: #4444ff;
+  color: white;
+  border: none;
+  border-radius: 8px;
+  padding: 10px 24px;
+  font-size: 14px;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+
+button:hover { background: #3333ee; }
+
+.errors {
+  background: #2a1010;
+  border: 1px solid #ff4444;
+  border-radius: 10px;
+  padding: 16px 20px;
+  margin-bottom: 20px;
+  color: #ff8888;
+  font-size: 14px;
+}
+
+.errors ul { margin-top: 8px; padding-left: 18px; }
+.errors li { margin-bottom: 4px; }
+
+.download-row {
+  display: flex;
+  gap: 12px;
+  margin-top: 12px;
+  margin-bottom: 20px;
+}
+
+.btn-download {
+  background: #22cc88;
+  color: #001a0e;
+  padding: 10px 20px;
+  border-radius: 8px;
+  text-decoration: none;
+  font-size: 14px;
+  font-weight: 600;
+  transition: background 0.2s;
+}
+
+.btn-download:hover { background: #11bb77; }
+.btn-download.secondary { background: #334; color: #aac; border: 1px solid #445; }
+.btn-download.secondary:hover { background: #445; }
+
+.params {
+  background: #111125;
+  border: 1px solid #2e2e4e;
+  border-radius: 10px;
+  padding: 14px 18px;
+  font-size: 12px;
+  font-family: monospace;
+  color: #88aaff;
+  margin-bottom: 20px;
+  white-space: pre-wrap;
+}
+
+.hidden { display: none !important; }

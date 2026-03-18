@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AI CAD Generator</title>
+  <script type="module" src="https://unpkg.com/@google/model-viewer/dist/model-viewer.min.js"></script>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+  <div class="container">
+    <h1>⚙️ AI CAD Generator</h1>
+    <p class="subtitle">Describe your model in plain English</p>
+
+    <div class="card">
+      <label>Describe your model</label>
+      <textarea id="prompt" rows="3"
+        placeholder="e.g. a box 50mm wide 30mm tall 20mm deep"></textarea>
+      <button type="button" id="generate-btn" onclick="generate()">Generate Model</button>
+    </div>
+
+    <div id="errors" class="errors hidden"></div>
+
+    <div id="viewer-section" class="hidden">
+      <model-viewer
+        id="viewer"
+        camera-controls
+        auto-rotate
+        shadow-intensity="1"
+        exposure="0.8"
+        style="width:100%; height:450px; background:#1a1a2e; border-radius:12px;">
+      </model-viewer>
+      <div class="download-row">
+        <a id="dl-glb" class="btn-download" download="model.glb">⬇ Download GLB</a>
+        <a id="dl-stl" class="btn-download secondary" download="model.stl">⬇ Download STL</a>
+      </div>
+    </div>
+
+    <div id="params-box" class="params hidden"></div>
+
+    <div id="edit-section" class="card hidden">
+      <label>Edit your model</label>
+      <textarea id="edit-prompt" rows="2"
+        placeholder="e.g. make it 10mm taller, change diameter to 25mm"></textarea>
+      <button type="button" id="edit-btn" onclick="editModel()">Apply Edit</button>
+    </div>
+
+  </div>
+
+  <script src="app.js?v=3"></script>
+
+</body>
+</html>
