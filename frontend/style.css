@@ -106,3 +106,85 @@ button:hover { background: #3333ee; }
 }
 
 .hidden { display: none !important; }
+
+/* === COLOR ROW LAYOUT IMPROVEMENT === */
+.color-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 14px;
+}
+
+/* === COLOR BUTTONS === */
+.color-btn {
+  width: 34px;
+  height: 34px;
+  border-radius: 10px;
+  border: 2px solid transparent;
+  cursor: pointer;
+  transition: all 0.18s ease;
+  box-shadow: 0 0 0 1px #2e2e4e, 0 4px 10px rgba(0,0,0,0.4);
+}
+
+/* hover */
+.color-btn:hover {
+  transform: translateY(-2px) scale(1.05);
+  box-shadow: 0 0 0 2px #6666ff, 0 6px 14px rgba(0,0,0,0.6);
+}
+
+/* click */
+.color-btn:active {
+  transform: scale(0.95);
+}
+
+/* selected */
+.color-btn.active {
+  border-color: #ffffff;
+  box-shadow: 0 0 0 2px #8888ff, 0 0 12px #5555ff;
+}
+
+/* === COLOR PICKER === */
+#custom-color {
+  width: 34px;
+  height: 34px;
+  border-radius: 10px;
+  border: 1px solid #2e2e4e;
+  cursor: pointer;
+  background: #111125;
+}
+
+/* === MATERIAL BUTTONS === */
+.mat-btn {
+  background: linear-gradient(145deg, #1f1f35, #161625);
+  color: #cfd3ff;
+  border: 1px solid #2e2e4e;
+  border-radius: 8px;
+  padding: 6px 14px;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  letter-spacing: 0.3px;
+  box-shadow: 0 2px 6px rgba(0,0,0,0.4);
+}
+
+.mat-btn:hover {
+  background: linear-gradient(145deg, #2a2a50, #1c1c35);
+  border-color: #5555ff;
+  color: #ffffff;
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(0,0,0,0.6);
+}
+
+.mat-btn:active {
+  transform: scale(0.96);
+}
+
+/* selected */
+.mat-btn.active {
+  background: linear-gradient(145deg, #4444ff, #2a2aff);
+  color: white;
+  border-color: #6666ff;
+  box-shadow: 0 0 10px rgba(85,85,255,0.8);
+}

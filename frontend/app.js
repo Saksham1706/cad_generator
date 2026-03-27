@@ -64,6 +64,29 @@ async function editModel() {
   btn.disabled = false;
 }
 
+function setMaterial(metallic, roughness, el = null) {
+  const viewer = document.getElementById("viewer");
+
+  // === ACTIVE STATE FIX ===
+  document.querySelectorAll(".mat-btn").forEach(b => b.classList.remove("active"));
+  if (el) el.classList.add("active");
+
+  function apply() {
+    if (viewer.model) {
+      const mat = viewer.model.materials[0];
+      mat.pbrMetallicRoughness.setMetallicFactor(metallic);
+      mat.pbrMetallicRoughness.setRoughnessFactor(roughness);
+    }
+  }
+
+  viewer.addEventListener("load", function onLoad() {
+    apply();
+    viewer.removeEventListener("load", onLoad);
+  });
+
+  apply();
+}
+
 function handleResponse(data) {
   const errBox        = document.getElementById("errors");
   const viewerSection = document.getElementById("viewer-section");
@@ -146,8 +169,13 @@ function showError(msg) {
   errBox.classList.remove("hidden");
 }
 
-function setColor(hex) {
+function setColor(hex, el = null) {
   const viewer = document.getElementById("viewer");
+
+  // === ACTIVE STATE FIX ===
+  document.querySelectorAll(".color-btn").forEach(b => b.classList.remove("active"));
+  if (el) el.classList.add("active");
+
   const r = parseInt(hex.slice(1, 3), 16) / 255;
   const g = parseInt(hex.slice(3, 5), 16) / 255;
   const b = parseInt(hex.slice(5, 7), 16) / 255;
@@ -168,3 +196,15 @@ function setColor(hex) {
 
   apply();
 }
+
+document.addEventListener("click", function (e) {
+  if (e.target.classList.contains("color-btn")) {
+    document.querySelectorAll(".color-btn").forEach(b => b.classList.remove("active"));
+    e.target.classList.add("active");
+  }
+
+  if (e.target.classList.contains("mat-btn")) {
+    document.querySelectorAll(".mat-btn").forEach(b => b.classList.remove("active"));
+    e.target.classList.add("active");
+  }
+});

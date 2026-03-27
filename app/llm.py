@@ -6,55 +6,69 @@ load_dotenv()
 client = Groq(api_key=os.getenv("GROQ_API_KEY"))
 
 NORMALIZER_PROMPT = """
-You are a CAD assistant. Your job is to understand what 3D shape the user wants, 
-even if they describe it vaguely, in another language, or using everyday objects as reference.
+You are a CAD assistant. Understand what 3D shape the user wants.
 
-Mapping rules:
-- pipe / tube / hollow cylinder / ring / donut cross-section → hollow_cylinder
-- can / cup / drum / rod / pillar / pole → cylinder  
-- cube / cuboid / brick / block / rectangular box → box
-- ball / globe / bead / round → sphere
-- funnel / pointed / pyramid-like / ice cream cone → cone
-- box with hole / box with dent / box with cavity / box with opening → box_with_hole
+Shape mapping:
+- pipe / tube / hollow cylinder → hollow_cylinder
+- can / cup / drum / rod / pillar → cylinder
+- cube / cuboid / brick / block → box
+- ball / globe → sphere
+- funnel / cone → cone
+- box/cube WITH circular hole → box_with_hole
+- box/cube WITH square/rectangular hole → box_with_square_hole
 
-Your job:
-1. Identify which of these 6 shapes best matches the user's description
-2. Extract all dimensions mentioned (convert any unit to mm: 1cm=10mm, 1m=1000mm, 1inch=25.4mm)
-3. Rewrite the request as a clear, specific English sentence
+UNIT CONVERSION — always convert to mm:
+- 1 cm = 10 mm, 1 m = 1000 mm, 1 inch = 25.4 mm
+
+HOLE RULES — very important:
+- "blind hole" or "hole of depth X" → use exact depth, NOT through
+- "through hole" or "drill through" → cut all the way through
+- No depth mentioned → add hole_depth_mm to missing_fields
+- "square hole side X" → hole_side_mm = X, shape = box_with_square_hole
+- "circular hole diameter X" → hole_diameter_mm = X, shape = box_with_hole
+
+FACE SELECTION RULES:
+- "top face" → face = "top"
+- "bottom face" → face = "bottom"  
+- "front face" → face = "front"
+- "smallest face / smallest surface" → face = "smallest"
+- "largest face / biggest surface" → face = "largest"
+- If no face mentioned → face = "top" (default)
 
 Return JSON only:
 {
   "understood_as": "<shape_name>",
-  "clarified_prompt": "<clear English rewrite>",
+  "clarified_prompt": "<clear English rewrite with all dims in mm>",
   "confidence": "high/medium/low",
   "reason": "<why you chose this shape>"
 }
-
-If the request has nothing to do with a 3D shape, set understood_as to "unknown".
 """
 
 EXTRACTOR_PROMPT = """
-You are a CAD parameter extractor. Return ONLY valid JSON, no explanation.
-Supported shapes: box, cylinder, hollow_cylinder, sphere, cone, box_with_hole
+You are a CAD parameter extractor. Return ONLY valid JSON.
+Supported shapes: box, cylinder, hollow_cylinder, sphere, cone, 
+                  box_with_hole, box_with_square_hole
 
-STRICT RULES:
-- All dimensions in mm
-- If any dimension is missing set it to null and add to missing_fields list
-- Never guess or assume dimensions — mark them null
-- Always use exact field names with _mm suffix
-
-Required fields per shape:
+Required fields:
 - box: width_mm, height_mm, depth_mm
 - cylinder: diameter_mm, height_mm
 - hollow_cylinder: outer_diameter_mm, inner_diameter_mm, height_mm
-- cone: base_diameter_mm, top_diameter_mm, height_mm
 - sphere: diameter_mm
-- box_with_hole: width_mm, height_mm, depth_mm, hole_diameter_mm, hole_depth_mm
+- cone: base_diameter_mm, top_diameter_mm, height_mm
+- box_with_hole: width_mm, height_mm, depth_mm, 
+                 hole_diameter_mm, hole_depth_mm, hole_face
+- box_with_square_hole: width_mm, height_mm, depth_mm,
+                        hole_side_mm, hole_depth_mm, hole_face
+
+hole_face options: "top", "bottom", "front", "back", "left", "right", "smallest", "largest"
+If hole depth not specified → null in missing_fields
 
 Examples:
-{"shape":"box","width_mm":50,"height_mm":30,"depth_mm":20,"missing_fields":[]}
-{"shape":"hollow_cylinder","outer_diameter_mm":30,"inner_diameter_mm":20,"height_mm":50,"missing_fields":[]}
-{"shape":"box_with_hole","width_mm":60,"height_mm":60,"depth_mm":60,"hole_diameter_mm":10,"hole_depth_mm":10,"missing_fields":[]}
+{"shape":"box_with_hole","width_mm":100,"height_mm":50,"depth_mm":30,
+ "hole_diameter_mm":10,"hole_depth_mm":10,"hole_face":"smallest","missing_fields":[]}
+
+{"shape":"box_with_square_hole","width_mm":100,"height_mm":50,"depth_mm":30,
+ "hole_side_mm":10,"hole_depth_mm":10,"hole_face":"top","missing_fields":[]}
 """
 
 def normalize_prompt(user_prompt: str) -> dict:
@@ -109,8 +123,6 @@ def extract_params(user_prompt: str) -> dict:
     return params
 
 def edit_params(previous: dict, edit: str) -> dict:
-    """Edit existing model params based on user instruction"""
-    
     # Clean previous params (remove debug keys)
     clean_prev = {k: v for k, v in previous.items() if not k.startswith("_")}
     
@@ -130,5 +142,19 @@ Keep all other fields exactly the same.
         temperature=0
     )
     raw = response.choices[0].message.content.strip()
+    print("EDIT RAW RESPONSE:", repr(raw))  # debug
+    
+    # Strip markdown fences
     raw = raw.replace("```json", "").replace("```", "").strip()
-    return json.loads(raw)
+    
+    # If empty response, return previous params unchanged
+    if not raw:
+        print("WARNING: Empty response from LLM, returning previous params")
+        return clean_prev
+    
+    try:
+        return json.loads(raw)
+    except json.JSONDecodeError as e:
+        print(f"JSON parse error: {e}, raw was: {repr(raw)}")
+        # Return previous params if parse fails
+        return clean_prev
