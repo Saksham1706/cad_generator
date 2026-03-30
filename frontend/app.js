@@ -129,15 +129,17 @@ const oldViewer = document.getElementById("viewer");
 oldViewer.remove();
 
 const newViewer = document.createElement("model-viewer");
-newViewer.id = "viewer";
-newViewer.setAttribute("camera-controls", "");
-newViewer.setAttribute("auto-rotate", "");
-newViewer.setAttribute("shadow-intensity", "1");
-newViewer.setAttribute("exposure", "0.8");
-newViewer.setAttribute("src", glbUrl + "?t=" + Date.now());
-newViewer.style.cssText = "width:100%; height:450px; background:#1a1a2e; border-radius:12px;";
-
-// Insert before the color-row div
+  newViewer.id = "viewer";
+  newViewer.setAttribute("camera-controls", "");
+  newViewer.setAttribute("auto-rotate", "");
+  newViewer.setAttribute("shadow-intensity", "1");
+  newViewer.setAttribute("exposure", "0.8");
+  newViewer.setAttribute("min-camera-orbit", "auto auto auto");
+  newViewer.setAttribute("max-camera-orbit", "Infinity Infinity auto");
+  
+  newViewer.setAttribute("src", glbUrl + "?t=" + Date.now());
+  newViewer.style.cssText = "width:100%; height:450px; background:#1a1a2e; border-radius:12px;";
+  
 const colorRow = document.querySelector(".color-row");
 viewerContainer.insertBefore(newViewer, colorRow);
 
