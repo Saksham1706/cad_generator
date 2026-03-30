@@ -26,3 +26,6 @@ Type what you want, get a 3D model you can view and download.
 Clone the repo and create a `.env` file with your Groq API key:
 ```text
 GROQ_API_KEY=your_key_here
+
+pip install -r requirements.txt
+uvicorn app.main:app --reload
