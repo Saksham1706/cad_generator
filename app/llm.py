@@ -1,9 +1,8 @@
 import os, json
+import streamlit as st
 from groq import Groq
-from dotenv import load_dotenv
-load_dotenv()
 
-client = Groq(api_key=os.getenv("GROQ_API_KEY"))
+client = Groq(api_key=st.secrets["GROQ_API_KEY"])
 
 NORMALIZER_PROMPT = """
 You are a CAD assistant. Understand what 3D shape the user wants.
