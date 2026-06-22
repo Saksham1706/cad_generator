@@ -2,10 +2,10 @@ from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-from llm import extract_params, edit_params
-from validator import validate_geometry
-from cad_engine import generate_model
-from session import SessionStore
+from app.llm import extract_params, edit_params
+from app.validator import validate_geometry
+from app.cad_engine import generate_model
+from app.session import SessionStore
 import uuid, os
 
 app = FastAPI()
