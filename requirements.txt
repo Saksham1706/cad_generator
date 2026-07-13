@@ -1,0 +1,9 @@
+fastapi
+uvicorn
+cadquery
+groq
+python-dotenv
+python-multipart
+trimesh
+numpy
+scipy
