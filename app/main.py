@@ -1,6 +1,7 @@
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import RedirectResponse
 from pydantic import BaseModel
 from typing import Optional, Any, Dict
 
@@ -22,6 +23,11 @@ app.mount("/outputs", StaticFiles(directory="outputs"), name="outputs")
 app.mount("/frontend", StaticFiles(directory="frontend"), name="frontend")
 
 sessions = SessionStore()
+
+
+@app.get("/")
+async def root():
+    return RedirectResponse(url="/frontend/index.html")
 
 
 class PromptRequest(BaseModel):

@@ -1,5 +1,9 @@
 console.log("app.js version 4 loaded");
-const API = "http://127.0.0.1:8000";
+// Same-origin by default so this works both locally (http://127.0.0.1:8000)
+// and once deployed (e.g. https://your-app.onrender.com) without any edits.
+const API = window.location.origin.includes("null") || window.location.protocol === "file:"
+  ? "http://127.0.0.1:8000"
+  : window.location.origin;
 let currentSession = null;
 let jsonMode = false;
 
