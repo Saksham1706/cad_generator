@@ -1,0 +1,329 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>CAD Forge — AI Design Engineer</title>
+  <script type="module" src="https://unpkg.com/@google/model-viewer/dist/model-viewer.min.js"></script>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+  <div id="toast-host"></div>
+  <div id="loading-overlay" class="loading-overlay hidden">
+    <div class="spinner"></div>
+    <p id="loading-text">Working…</p>
+  </div>
+
+  <header class="app-header">
+    <div class="brand">
+      <div class="brand-mark" aria-hidden="true"></div>
+      <div>
+        <h1>CAD Forge</h1>
+        <p class="subtitle">AI Design Engineer — model, analyze, document</p>
+      </div>
+    </div>
+    <div class="header-actions">
+      <span id="model-badge" class="model-badge" title="Language model from server env">LLM …</span>
+      <span id="session-badge" class="session-badge hidden"></span>
+      <button type="button" id="mode-toggle" class="btn-ghost" onclick="toggleMode()">JSON Mode</button>
+      <button type="button" class="btn-ghost" onclick="copyShareLink()" title="Copy shareable session link">Share</button>
+      <kbd class="kbd-hint">Ctrl+Enter generate · Ctrl+Z undo</kbd>
+    </div>
+  </header>
+
+  <nav class="tabs" role="tablist">
+    <button type="button" class="tab active" data-tab="design" onclick="switchTab('design')">Design</button>
+    <button type="button" class="tab" data-tab="engineer" onclick="switchTab('engineer')">Beam Engineer</button>
+    <button type="button" class="tab" data-tab="tools" onclick="switchTab('tools')">Tools</button>
+    <button type="button" class="tab" data-tab="library" onclick="switchTab('library')">Library</button>
+    <button type="button" class="tab" data-tab="bom" onclick="switchTab('bom')">BOM</button>
+  </nav>
+
+  <main class="workspace">
+    <aside class="panel-left">
+
+      <!-- DESIGN TAB -->
+      <section id="tab-design" class="tab-panel active">
+        <div class="card" id="example-card">
+          <label>Try an example</label>
+          <div id="example-chips" class="chip-row"></div>
+        </div>
+
+        <div class="card" id="template-card">
+          <div class="card-head">
+            <label>Quick-start templates</label>
+            <input type="search" id="template-search" class="search-input" placeholder="Filter…" oninput="filterTemplates()">
+          </div>
+          <div id="template-groups"></div>
+        </div>
+
+        <div class="card" id="prompt-card">
+          <div class="card-head">
+            <label>Describe your model</label>
+            <button type="button" class="btn-ghost sm" onclick="showPromptHistory()" title="Recent prompts">History</button>
+          </div>
+          <textarea id="prompt" rows="3"
+            placeholder="e.g. a water bottle 220mm tall, or a simple chair, or a box 50×30×20mm"></textarea>
+          <div id="prompt-history" class="prompt-history hidden"></div>
+
+          <div class="row-inline">
+            <label class="inline-label">Material</label>
+            <select id="material-select"></select>
+          </div>
+
+          <div id="clarify-box" class="clarify hidden"></div>
+
+          <button type="button" id="generate-btn" class="btn-primary" onclick="generate()">Generate Model</button>
+        </div>
+
+        <div class="card hidden" id="json-card">
+          <label>Raw CAD parameters (JSON) — bypasses the language model</label>
+          <textarea id="json-input" rows="10" spellcheck="false"
+            placeholder='{"shape":"box","width_mm":50,"depth_mm":30,"height_mm":20}'></textarea>
+          <button type="button" id="json-generate-btn" class="btn-primary" onclick="generateManual()">Generate from JSON</button>
+        </div>
+
+        <div id="errors" class="errors hidden"></div>
+
+        <div id="edit-section" class="card hidden">
+          <label>Natural-language edit</label>
+          <textarea id="edit-prompt" rows="2"
+            placeholder="e.g. make it 10mm taller, add M4 bolt circle of 6 holes, fillet 2mm"></textarea>
+          <button type="button" id="edit-btn" class="btn-primary" onclick="editModel()">Apply Edit</button>
+        </div>
+
+        <div id="inspector-section" class="card hidden">
+          <div class="card-head">
+            <label>Parametric inspector</label>
+            <button type="button" class="btn-ghost sm" onclick="applyInspector()">Rebuild from fields</button>
+          </div>
+          <div id="inspector-fields" class="inspector-grid"></div>
+        </div>
+      </section>
+
+      <!-- ENGINEER TAB -->
+      <section id="tab-engineer" class="tab-panel">
+        <div class="card">
+          <label>Beam stress &amp; deflection</label>
+          <p class="help">Deterministic formulas — not LLM math. Simply-supported or cantilever, point or UDL.</p>
+
+          <div class="form-grid">
+            <label>Span (mm)<input type="number" id="beam-span" value="500" min="1"></label>
+            <label>Load (kg)<input type="number" id="beam-load" value="100" min="0.1" step="0.1"></label>
+            <label>Support
+              <select id="beam-support">
+                <option value="simply_supported">Simply supported</option>
+                <option value="cantilever">Cantilever</option>
+              </select>
+            </label>
+            <label>Load type
+              <select id="beam-load-type">
+                <option value="point_center">Point (center / tip)</option>
+                <option value="udl">Uniform distributed</option>
+              </select>
+            </label>
+            <label>Section
+              <select id="beam-section" onchange="toggleBeamSection()">
+                <option value="rect">Rectangular</option>
+                <option value="circ">Circular</option>
+              </select>
+            </label>
+            <label>Min FoS<input type="number" id="beam-fos" value="1.5" min="1" step="0.1"></label>
+          </div>
+
+          <div id="beam-rect-fields" class="form-grid">
+            <label>Width (mm)<input type="number" id="beam-w" value="40"></label>
+            <label>Height (mm)<input type="number" id="beam-h" value="60"></label>
+          </div>
+          <div id="beam-circ-fields" class="form-grid hidden">
+            <label>Diameter (mm)<input type="number" id="beam-d" value="40"></label>
+          </div>
+
+          <div class="row-inline">
+            <label class="inline-label">Check material</label>
+            <select id="beam-material"><option value="">— Recommend cheapest OK —</option></select>
+          </div>
+
+          <div class="btn-row">
+            <button type="button" class="btn-primary" onclick="runBeamCalc()">Calculate</button>
+            <button type="button" class="btn-ghost" onclick="beamToCad()">Generate CAD beam</button>
+          </div>
+
+          <div id="beam-result" class="result-box hidden"></div>
+        </div>
+      </section>
+
+      <!-- TOOLS TAB -->
+      <section id="tab-tools" class="tab-panel">
+        <div class="card">
+          <label>Metric bolt circle</label>
+          <p class="help">Apply a standards-based hole pattern to the current part.</p>
+          <div class="form-grid">
+            <label>Fastener
+              <select id="fastener-select"></select>
+            </label>
+            <label>Count<input type="number" id="bc-count" value="6" min="2" max="36"></label>
+            <label>Pitch Ø (mm)<input type="number" id="bc-pcd" placeholder="auto"></label>
+            <label>Hole type
+              <select id="bc-hole-type">
+                <option value="clearance">Clearance</option>
+                <option value="tap">Tap drill</option>
+              </select>
+            </label>
+            <label>Face
+              <select id="bc-face">
+                <option value="top">Top</option>
+                <option value="bottom">Bottom</option>
+                <option value="front">Front</option>
+              </select>
+            </label>
+          </div>
+          <button type="button" class="btn-primary" onclick="applyBoltCircle()">Apply bolt circle</button>
+        </div>
+
+        <div class="card">
+          <label>Uniform scale</label>
+          <div class="row-inline">
+            <input type="number" id="scale-factor" value="2" min="0.01" max="100" step="0.1" style="width:100px">
+            <button type="button" class="btn-ghost" onclick="scaleModel()">Scale</button>
+          </div>
+          <div class="chip-row mt">
+            <button type="button" class="chip" onclick="scaleBy(0.5)">½×</button>
+            <button type="button" class="chip" onclick="scaleBy(0.75)">¾×</button>
+            <button type="button" class="chip" onclick="scaleBy(1.5)">1.5×</button>
+            <button type="button" class="chip" onclick="scaleBy(2)">2×</button>
+          </div>
+        </div>
+
+        <div class="card">
+          <label>Material cost compare</label>
+          <p class="help">Same solid volume priced across common materials.</p>
+          <button type="button" class="btn-ghost" onclick="compareMaterials()">Compare materials</button>
+          <div id="compare-result" class="result-box hidden"></div>
+        </div>
+
+        <div class="card">
+          <label>Session actions</label>
+          <div class="btn-row wrap">
+            <button type="button" class="btn-ghost" onclick="cloneSession()">Clone part</button>
+            <button type="button" class="btn-ghost" onclick="generateDrawing()">Technical drawing</button>
+            <button type="button" class="btn-ghost" onclick="downloadPack()">Export pack (ZIP)</button>
+            <button type="button" class="btn-ghost" onclick="saveToLibrary()">Save to library</button>
+            <button type="button" class="btn-ghost" onclick="copyParams()">Copy params</button>
+            <button type="button" class="btn-ghost" onclick="downloadParams()">Download JSON</button>
+          </div>
+          <div id="drawing-links" class="result-box hidden"></div>
+        </div>
+
+        <div class="card">
+          <label>Recent sessions</label>
+          <div id="sessions-list" class="list-stack"></div>
+        </div>
+      </section>
+
+      <!-- LIBRARY TAB -->
+      <section id="tab-library" class="tab-panel">
+        <div class="card">
+          <div class="card-head">
+            <label>Part library</label>
+            <button type="button" class="btn-ghost sm" onclick="loadLibrary()">Refresh</button>
+          </div>
+          <div id="library-list" class="list-stack"></div>
+        </div>
+      </section>
+
+      <!-- BOM TAB -->
+      <section id="tab-bom" class="tab-panel">
+        <div class="card">
+          <label>Bill of materials</label>
+          <p class="help">Add the current session (or any session id) with a quantity.</p>
+          <div class="form-grid">
+            <label>Session ID<input type="text" id="bom-sid" placeholder="auto from current"></label>
+            <label>Qty<input type="number" id="bom-qty" value="1" min="1"></label>
+            <label>Part no.<input type="text" id="bom-pn" placeholder="optional"></label>
+            <label>Description<input type="text" id="bom-desc" placeholder="optional"></label>
+          </div>
+          <div class="btn-row">
+            <button type="button" class="btn-ghost" onclick="addBomLine()">Add line</button>
+            <button type="button" class="btn-primary" onclick="buildBom()">Build BOM</button>
+            <button type="button" class="btn-ghost" onclick="clearBom()">Clear</button>
+          </div>
+          <div id="bom-lines" class="list-stack"></div>
+          <div id="bom-result" class="result-box hidden"></div>
+        </div>
+      </section>
+    </aside>
+
+    <section class="panel-right">
+      <div id="viewer-section" class="viewer-wrap hidden">
+        <model-viewer
+          id="viewer"
+          camera-controls
+          auto-rotate
+          shadow-intensity="1"
+          exposure="0.85"
+          interaction-prompt="auto">
+        </model-viewer>
+
+        <div class="viewer-toolbar">
+          <div class="color-row">
+            <span>Color</span>
+            <button type="button" class="color-btn" style="background:#6b8cae" onclick="setColor('#6b8cae', this)"></button>
+            <button type="button" class="color-btn" style="background:#c45c26" onclick="setColor('#c45c26', this)"></button>
+            <button type="button" class="color-btn" style="background:#2d8a5e" onclick="setColor('#2d8a5e', this)"></button>
+            <button type="button" class="color-btn" style="background:#d4a017" onclick="setColor('#d4a017', this)"></button>
+            <button type="button" class="color-btn" style="background:#1a1a1a" onclick="setColor('#1a1a1a', this)"></button>
+            <input type="color" id="custom-color" onchange="setColor(this.value)" title="Custom color">
+            <span class="sep">Finish</span>
+            <button type="button" class="mat-btn" onclick="setMaterial(0.15, 0.55, this)">Plastic</button>
+            <button type="button" class="mat-btn" onclick="setMaterial(1.0, 0.18, this)">Metal</button>
+            <button type="button" class="mat-btn" onclick="setMaterial(0.0, 0.85, this)">Rubber</button>
+            <button type="button" class="mat-btn" onclick="setMaterial(0.35, 0.7, this)">Matte</button>
+            <span class="sep"></span>
+            <button type="button" class="mat-btn" id="auto-rotate-btn" onclick="toggleAutoRotate()">Auto-rotate</button>
+            <button type="button" class="mat-btn" onclick="resetCamera()">Reset view</button>
+          </div>
+        </div>
+
+        <div class="history-row">
+          <button type="button" id="undo-btn" class="btn-ghost sm" onclick="doUndo()" disabled>Undo</button>
+          <button type="button" id="redo-btn" class="btn-ghost sm" onclick="doRedo()" disabled>Redo</button>
+          <span id="history-count" class="history-count"></span>
+          <button type="button" class="btn-ghost sm" onclick="toggleHistoryPanel()">Timeline</button>
+        </div>
+        <div id="history-panel" class="history-panel hidden"></div>
+
+        <div id="clarify-banner" class="clarify-banner hidden"></div>
+
+        <div id="properties-panel" class="properties"></div>
+        <div id="print-panel" class="print-panel hidden"></div>
+        <div id="dfm-panel" class="dfm-panel hidden"></div>
+
+        <div class="download-row">
+          <a id="dl-glb" class="btn-download" download="model.glb">GLB</a>
+          <a id="dl-stl" class="btn-download secondary" download="model.stl">STL</a>
+          <a id="dl-step" class="btn-download secondary" download="model.step">STEP</a>
+          <button type="button" class="btn-download secondary" onclick="downloadPack()">ZIP pack</button>
+          <button type="button" class="btn-download secondary" onclick="generateDrawing()">Drawing</button>
+          <button type="button" class="btn-download secondary" onclick="copyParams()">Copy JSON</button>
+        </div>
+
+        <div id="params-box" class="params hidden"></div>
+      </div>
+
+      <div id="empty-state" class="empty-state">
+        <h2>Start a design</h2>
+        <p>Pick an example, describe a part in plain English, or paste JSON parameters.</p>
+        <div id="empty-chips" class="chip-row center mt"></div>
+        <p class="muted mt">Then analyze beams, apply M-series bolt circles, export drawings, and build a BOM.</p>
+      </div>
+    </section>
+  </main>
+
+  <script src="app.js?v=8"></script>
+</body>
+</html>
