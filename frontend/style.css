@@ -282,13 +282,6 @@ button:disabled { opacity: 0.4; cursor: not-allowed; }
   background: rgba(61,155,106,0.12);
 }
 
-.search-input {
-  width: 120px;
-  margin: 0;
-  padding: 5px 8px;
-  font-size: 12px;
-}
-
 .prompt-history {
   margin: -4px 0 10px;
   max-height: 140px;
