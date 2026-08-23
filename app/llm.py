@@ -23,7 +23,7 @@ _api_key = os.getenv("GROQ_API_KEY")
 client = Groq(api_key=_api_key) if _api_key else None
 
 # Keep default in sync with .env — override only via GROQ_MODEL
-MODEL = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
+MODEL = os.getenv("GROQ_MODEL", "openai/gpt-oss-120b")
 
 # In-process prompt → params cache (same prompt within a session is instant)
 _PARAM_CACHE: dict[str, dict] = {}

@@ -8,6 +8,8 @@ services:
     envVars:
       - key: GROQ_API_KEY
         sync: false        # set the actual value in the Render dashboard, never in this file
+      - key: GROQ_MODEL
+        value: openai/gpt-oss-120b
       - key: PYTHON_VERSION
         value: 3.12.3
     # Free plan has no persistent disk — outputs/ and session history reset on

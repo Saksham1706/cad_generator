@@ -3,7 +3,7 @@
 Generate 3D CAD models from plain English or exact JSON, then analyze, document, and cost them
 in one workspace. Built on CadQuery + FastAPI with a full engineering toolkit in the UI.
 
-**LLM:** Groq via `GROQ_API_KEY` — model from `GROQ_MODEL` (default `llama-3.3-70b-versatile`).
+**LLM:** Groq via `GROQ_API_KEY` — model from `GROQ_MODEL` (default `openai/gpt-oss-120b`).
 
 ## Core CAD
 
@@ -39,7 +39,7 @@ in one workspace. Built on CadQuery + FastAPI with a full engineering toolkit in
 
 ```text
 GROQ_API_KEY=your_key_here
-GROQ_MODEL=llama-3.3-70b-versatile
+GROQ_MODEL=openai/gpt-oss-120b
 ```
 
 ```bash

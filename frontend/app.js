@@ -150,7 +150,7 @@ async function loadHealth() {
     const badge = document.getElementById("model-badge");
     const llm = data.llm || {};
     const model = llm.model || "unknown";
-    const short = model.replace("llama-", "L").replace("-versatile", "");
+    const short = model.includes("/") ? model.split("/").pop() : model;
     badge.textContent = llm.configured ? short : "JSON only";
     badge.title = llm.configured
       ? `Groq · ${model}`
@@ -235,21 +235,6 @@ function renderTemplates(groups) {
   if (!container.children.length) {
     container.innerHTML = '<p class="muted">No templates match.</p>';
   }
-}
-
-function filterTemplates() {
-  const q = (document.getElementById("template-search").value || "").toLowerCase().trim();
-  if (!q) {
-    renderTemplates(allTemplates);
-    return;
-  }
-  const filtered = allTemplates.map(g => ({
-    category: g.category,
-    items: g.items.filter(i =>
-      i.label.toLowerCase().includes(q) || i.prompt.toLowerCase().includes(q)
-    ),
-  })).filter(g => g.items.length);
-  renderTemplates(filtered);
 }
 
 async function loadMaterials() {
