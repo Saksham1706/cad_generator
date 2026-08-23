@@ -38,9 +38,6 @@
   <nav class="tabs" role="tablist">
     <button type="button" class="tab active" data-tab="design" onclick="switchTab('design')">Design</button>
     <button type="button" class="tab" data-tab="engineer" onclick="switchTab('engineer')">Beam Engineer</button>
-    <button type="button" class="tab" data-tab="tools" onclick="switchTab('tools')">Tools</button>
-    <button type="button" class="tab" data-tab="library" onclick="switchTab('library')">Library</button>
-    <button type="button" class="tab" data-tab="bom" onclick="switchTab('bom')">BOM</button>
   </nav>
 
   <main class="workspace">
@@ -153,106 +150,6 @@
           <div id="beam-result" class="result-box hidden"></div>
         </div>
       </section>
-
-      <!-- TOOLS TAB -->
-      <section id="tab-tools" class="tab-panel">
-        <div class="card">
-          <label>Metric bolt circle</label>
-          <p class="help">Apply a standards-based hole pattern to the current part.</p>
-          <div class="form-grid">
-            <label>Fastener
-              <select id="fastener-select"></select>
-            </label>
-            <label>Count<input type="number" id="bc-count" value="6" min="2" max="36"></label>
-            <label>Pitch Ø (mm)<input type="number" id="bc-pcd" placeholder="auto"></label>
-            <label>Hole type
-              <select id="bc-hole-type">
-                <option value="clearance">Clearance</option>
-                <option value="tap">Tap drill</option>
-              </select>
-            </label>
-            <label>Face
-              <select id="bc-face">
-                <option value="top">Top</option>
-                <option value="bottom">Bottom</option>
-                <option value="front">Front</option>
-              </select>
-            </label>
-          </div>
-          <button type="button" class="btn-primary" onclick="applyBoltCircle()">Apply bolt circle</button>
-        </div>
-
-        <div class="card">
-          <label>Uniform scale</label>
-          <div class="row-inline">
-            <input type="number" id="scale-factor" value="2" min="0.01" max="100" step="0.1" style="width:100px">
-            <button type="button" class="btn-ghost" onclick="scaleModel()">Scale</button>
-          </div>
-          <div class="chip-row mt">
-            <button type="button" class="chip" onclick="scaleBy(0.5)">½×</button>
-            <button type="button" class="chip" onclick="scaleBy(0.75)">¾×</button>
-            <button type="button" class="chip" onclick="scaleBy(1.5)">1.5×</button>
-            <button type="button" class="chip" onclick="scaleBy(2)">2×</button>
-          </div>
-        </div>
-
-        <div class="card">
-          <label>Material cost compare</label>
-          <p class="help">Same solid volume priced across common materials.</p>
-          <button type="button" class="btn-ghost" onclick="compareMaterials()">Compare materials</button>
-          <div id="compare-result" class="result-box hidden"></div>
-        </div>
-
-        <div class="card">
-          <label>Session actions</label>
-          <div class="btn-row wrap">
-            <button type="button" class="btn-ghost" onclick="cloneSession()">Clone part</button>
-            <button type="button" class="btn-ghost" onclick="generateDrawing()">Technical drawing</button>
-            <button type="button" class="btn-ghost" onclick="downloadPack()">Export pack (ZIP)</button>
-            <button type="button" class="btn-ghost" onclick="saveToLibrary()">Save to library</button>
-            <button type="button" class="btn-ghost" onclick="copyParams()">Copy params</button>
-            <button type="button" class="btn-ghost" onclick="downloadParams()">Download JSON</button>
-          </div>
-          <div id="drawing-links" class="result-box hidden"></div>
-        </div>
-
-        <div class="card">
-          <label>Recent sessions</label>
-          <div id="sessions-list" class="list-stack"></div>
-        </div>
-      </section>
-
-      <!-- LIBRARY TAB -->
-      <section id="tab-library" class="tab-panel">
-        <div class="card">
-          <div class="card-head">
-            <label>Part library</label>
-            <button type="button" class="btn-ghost sm" onclick="loadLibrary()">Refresh</button>
-          </div>
-          <div id="library-list" class="list-stack"></div>
-        </div>
-      </section>
-
-      <!-- BOM TAB -->
-      <section id="tab-bom" class="tab-panel">
-        <div class="card">
-          <label>Bill of materials</label>
-          <p class="help">Add the current session (or any session id) with a quantity.</p>
-          <div class="form-grid">
-            <label>Session ID<input type="text" id="bom-sid" placeholder="auto from current"></label>
-            <label>Qty<input type="number" id="bom-qty" value="1" min="1"></label>
-            <label>Part no.<input type="text" id="bom-pn" placeholder="optional"></label>
-            <label>Description<input type="text" id="bom-desc" placeholder="optional"></label>
-          </div>
-          <div class="btn-row">
-            <button type="button" class="btn-ghost" onclick="addBomLine()">Add line</button>
-            <button type="button" class="btn-primary" onclick="buildBom()">Build BOM</button>
-            <button type="button" class="btn-ghost" onclick="clearBom()">Clear</button>
-          </div>
-          <div id="bom-lines" class="list-stack"></div>
-          <div id="bom-result" class="result-box hidden"></div>
-        </div>
-      </section>
     </aside>
 
     <section class="panel-right">
@@ -316,11 +213,11 @@
         <h2>Start a design</h2>
         <p>Pick an example, describe a part in plain English, or paste JSON parameters.</p>
         <div id="empty-chips" class="chip-row center mt"></div>
-        <p class="muted mt">Then analyze beams, apply M-series bolt circles, export drawings, and build a BOM.</p>
+        <p class="muted mt">Then analyze beams, export drawings, and download STL/STEP/GLB.</p>
       </div>
     </section>
   </main>
 
-  <script src="app.js?v=9"></script>
+  <script src="app.js?v=10"></script>
 </body>
 </html>

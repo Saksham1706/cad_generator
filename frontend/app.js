@@ -1,4 +1,4 @@
-console.log("CAD Forge app.js v9");
+console.log("CAD Forge app.js v10");
 const API = window.location.origin.includes("null") || window.location.protocol === "file:"
   ? "http://127.0.0.1:8000"
   : window.location.origin;
@@ -10,7 +10,6 @@ let currentSession = null;
 let currentParams = null;
 let currentProps = null;
 let jsonMode = false;
-let bomCart = [];
 let lastBeamPayload = null;
 let allTemplates = [];
 let autoRotateOn = true;
@@ -32,9 +31,6 @@ document.addEventListener("DOMContentLoaded", () => {
   loadTemplates();
   loadMaterials();
   loadStructuralMaterials();
-  loadFasteners();
-  loadLibrary();
-  loadSessions();
   restoreFromUrl();
   bindShortcuts();
 });
@@ -45,12 +41,6 @@ document.addEventListener("DOMContentLoaded", () => {
 function switchTab(name) {
   document.querySelectorAll(".tab").forEach(t => t.classList.toggle("active", t.dataset.tab === name));
   document.querySelectorAll(".tab-panel").forEach(p => p.classList.toggle("active", p.id === "tab-" + name));
-  if (name === "library") loadLibrary();
-  if (name === "tools") loadSessions();
-  if (name === "bom" && currentSession) {
-    const el = document.getElementById("bom-sid");
-    if (el && !el.value) el.value = currentSession;
-  }
 }
 
 function toast(msg, type = "info") {
@@ -268,24 +258,6 @@ async function loadStructuralMaterials() {
     });
   } catch (err) {
     console.error("structural mats:", err);
-  }
-}
-
-async function loadFasteners() {
-  try {
-    const res = await fetch(API + "/fasteners");
-    const data = await res.json();
-    const select = document.getElementById("fastener-select");
-    select.innerHTML = "";
-    data.fasteners.forEach(f => {
-      const opt = document.createElement("option");
-      opt.value = f.id;
-      opt.textContent = `${f.id}  clearance Ø${f.clearance_mm}mm`;
-      if (f.id === "M4") opt.selected = true;
-      select.appendChild(opt);
-    });
-  } catch (err) {
-    console.error("fasteners:", err);
   }
 }
 
@@ -637,7 +609,6 @@ function handleResponse(data) {
   renderHistoryControls(data);
   renderInspector(cleanParams);
   syncViewerToMaterial(cleanParams.material || currentMaterial());
-  loadSessions();
   toast("Model ready · " + (cleanParams.shape || "part"));
 }
 
@@ -824,21 +795,6 @@ function copyParams() {
   });
 }
 
-function downloadParams() {
-  const clean = cleanParamsForExport();
-  if (!clean) {
-    toast("No params yet", "warn");
-    return;
-  }
-  const blob = new Blob([JSON.stringify(clean, null, 2)], { type: "application/json" });
-  const a = document.createElement("a");
-  a.href = URL.createObjectURL(blob);
-  a.download = (currentSession || "part") + "_params.json";
-  a.click();
-  URL.revokeObjectURL(a.href);
-  toast("JSON downloaded");
-}
-
 // ---------------------------------------------------------------------
 // Beam engineer
 // ---------------------------------------------------------------------
@@ -930,108 +886,8 @@ async function beamToCad() {
 }
 
 // ---------------------------------------------------------------------
-// Tools
+// Exports (viewer toolbar)
 // ---------------------------------------------------------------------
-async function applyBoltCircle() {
-  if (!currentSession) {
-    toast("Generate a part first", "warn");
-    return;
-  }
-  const pcd = document.getElementById("bc-pcd").value;
-  setLoading(true, "Applying bolt circle…");
-  try {
-    const res = await fetch(API + "/apply_bolt_circle", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        session_id: currentSession,
-        fastener: document.getElementById("fastener-select").value,
-        count: +document.getElementById("bc-count").value,
-        pitch_diameter_mm: pcd ? +pcd : null,
-        hole_type: document.getElementById("bc-hole-type").value,
-        face: document.getElementById("bc-face").value,
-        material: currentMaterial(),
-      }),
-    });
-    handleResponse(await res.json());
-  } finally {
-    setLoading(false);
-  }
-}
-
-async function scaleModel() {
-  if (!currentSession) {
-    toast("Generate a part first", "warn");
-    return;
-  }
-  const factor = +document.getElementById("scale-factor").value;
-  setLoading(true, "Scaling…");
-  try {
-    const res = await fetch(API + "/scale", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ session_id: currentSession, factor, material: currentMaterial() }),
-    });
-    handleResponse(await res.json());
-  } finally {
-    setLoading(false);
-  }
-}
-
-async function scaleBy(factor) {
-  document.getElementById("scale-factor").value = factor;
-  await scaleModel();
-}
-
-async function compareMaterials() {
-  if (!currentSession) {
-    toast("Generate a part first", "warn");
-    return;
-  }
-  const box = document.getElementById("compare-result");
-  setLoading(true, "Comparing materials…");
-  try {
-    const res = await fetch(API + "/compare_materials", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ session_id: currentSession }),
-    });
-    const data = await res.json();
-    if (!data.success) {
-      box.innerHTML = (data.errors || []).join(", ");
-      box.classList.remove("hidden");
-      return;
-    }
-    let html = `<table class="bom-table"><thead><tr>
-      <th>Material</th><th>Density</th><th>Weight</th><th>Cost</th></tr></thead><tbody>`;
-    data.materials.forEach(m => {
-      const sel = currentParams && currentParams.material === m.id ? " class='row-sel'" : "";
-      html += `<tr${sel}><td>${escapeHtml(m.label)}</td><td>${m.density_g_cm3}</td>
-        <td>${m.weight_g} g</td><td>$${m.cost_usd}</td></tr>`;
-    });
-    html += "</tbody></table>";
-    box.innerHTML = html;
-    box.classList.remove("hidden");
-    toast("Material comparison ready");
-  } finally {
-    setLoading(false);
-  }
-}
-
-async function cloneSession() {
-  if (!currentSession) {
-    toast("Generate a part first", "warn");
-    return;
-  }
-  const res = await fetch(API + "/clone", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ session_id: currentSession }),
-  });
-  handleResponse(await res.json());
-  toast("Cloned to new session");
-}
-
 async function generateDrawing() {
   if (!currentSession) {
     toast("Generate a part first", "warn");
@@ -1050,16 +906,10 @@ async function generateDrawing() {
       }),
     });
     const data = await res.json();
-    const box = document.getElementById("drawing-links");
     if (!data.success) {
-      box.innerHTML = (data.errors || []).join(", ");
-      box.classList.remove("hidden");
+      toast((data.errors || ["Drawing failed"]).join(", "), "err");
       return;
     }
-    let html = `<a href="${API + data.svg_url}" target="_blank" class="btn-download secondary">Open SVG</a> `;
-    if (data.pdf_url) html += `<a href="${API + data.pdf_url}" target="_blank" class="btn-download secondary">Open PDF</a>`;
-    box.innerHTML = html;
-    box.classList.remove("hidden");
     window.open(API + data.svg_url, "_blank");
     toast("Drawing ready");
   } finally {
@@ -1073,192 +923,6 @@ function downloadPack() {
     return;
   }
   window.location.href = API + "/export_pack/" + currentSession;
-}
-
-async function saveToLibrary() {
-  if (!currentSession) {
-    toast("Generate a part first", "warn");
-    return;
-  }
-  const name = prompt("Name this part:", (currentParams && currentParams.shape) || "part");
-  if (!name) return;
-  const res = await fetch(API + "/library/save", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ name, session_id: currentSession }),
-  });
-  const data = await res.json();
-  if (data.success) {
-    toast("Saved to library: " + name);
-    loadLibrary();
-  } else {
-    toast((data.errors || ["Save failed"]).join(", "), "err");
-  }
-}
-
-async function loadLibrary() {
-  try {
-    const res = await fetch(API + "/library");
-    const data = await res.json();
-    const host = document.getElementById("library-list");
-    host.innerHTML = "";
-    if (!data.parts || !data.parts.length) {
-      host.innerHTML = '<p class="muted">No saved parts yet. Design something, then Save to library.</p>';
-      return;
-    }
-    data.parts.forEach(p => {
-      const row = document.createElement("div");
-      row.className = "list-row";
-      row.innerHTML = `<div><b>${escapeHtml(p.name)}</b><div class="muted">${escapeHtml(p.params?.shape || "")} · ${new Date(p.updated_at).toLocaleString()}</div></div>`;
-      const actions = document.createElement("div");
-      actions.className = "btn-row";
-      const loadBtn = document.createElement("button");
-      loadBtn.type = "button";
-      loadBtn.className = "btn-ghost sm";
-      loadBtn.textContent = "Load";
-      loadBtn.onclick = () => loadLibraryPart(p.id);
-      const delBtn = document.createElement("button");
-      delBtn.type = "button";
-      delBtn.className = "btn-ghost sm danger";
-      delBtn.textContent = "Delete";
-      delBtn.onclick = () => deleteLibraryPart(p.id);
-      actions.appendChild(loadBtn);
-      actions.appendChild(delBtn);
-      row.appendChild(actions);
-      host.appendChild(row);
-    });
-  } catch (err) {
-    console.error(err);
-  }
-}
-
-async function loadLibraryPart(id) {
-  setLoading(true, "Loading part…");
-  try {
-    const res = await fetch(API + "/library/load", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ part_id: id, material: currentMaterial() }),
-    });
-    handleResponse(await res.json());
-    switchTab("design");
-  } finally {
-    setLoading(false);
-  }
-}
-
-async function deleteLibraryPart(id) {
-  if (!confirm("Delete this library part?")) return;
-  await fetch(API + "/library/" + id, { method: "DELETE" });
-  loadLibrary();
-  toast("Deleted");
-}
-
-async function loadSessions() {
-  try {
-    const res = await fetch(API + "/sessions");
-    const data = await res.json();
-    const host = document.getElementById("sessions-list");
-    host.innerHTML = "";
-    (data.sessions || []).slice(0, 12).forEach(s => {
-      const row = document.createElement("button");
-      row.type = "button";
-      row.className = "list-row as-btn";
-      row.innerHTML = `<b>${escapeHtml(s.session_id)}</b> · ${escapeHtml(s.shape)} · ${s.versions} versions`;
-      row.onclick = async () => {
-        setLoading(true, "Loading session…");
-        try {
-          const hist = await fetch(API + "/history/" + s.session_id);
-          const h = await hist.json();
-          const latest = h.history[h.history.length - 1];
-          const again = await fetch(API + "/generate_manual", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ params: latest, session_id: s.session_id }),
-          });
-          handleResponse(await again.json());
-          switchTab("design");
-        } finally {
-          setLoading(false);
-        }
-      };
-      host.appendChild(row);
-    });
-    if (!host.children.length) host.innerHTML = '<p class="muted">No sessions yet.</p>';
-  } catch (err) {
-    console.error(err);
-  }
-}
-
-// ---------------------------------------------------------------------
-// BOM
-// ---------------------------------------------------------------------
-function addBomLine() {
-  const sid = document.getElementById("bom-sid").value.trim() || currentSession;
-  if (!sid) {
-    toast("Need a session id", "warn");
-    return;
-  }
-  bomCart.push({
-    session_id: sid,
-    quantity: +document.getElementById("bom-qty").value || 1,
-    part_number: document.getElementById("bom-pn").value.trim() || null,
-    description: document.getElementById("bom-desc").value.trim() || null,
-  });
-  renderBomCart();
-  toast("Line added");
-}
-
-function renderBomCart() {
-  const host = document.getElementById("bom-lines");
-  host.innerHTML = bomCart.map((l, i) =>
-    `<div class="list-row"><span>${escapeHtml(l.part_number || l.session_id)} × ${l.quantity}</span>
-     <button type="button" class="btn-ghost sm" onclick="bomCart.splice(${i},1);renderBomCart()">Remove</button></div>`
-  ).join("");
-}
-
-function clearBom() {
-  bomCart = [];
-  renderBomCart();
-  document.getElementById("bom-result").classList.add("hidden");
-}
-
-async function buildBom() {
-  if (!bomCart.length) {
-    if (currentSession) {
-      bomCart.push({ session_id: currentSession, quantity: 1 });
-      renderBomCart();
-    } else {
-      toast("Add at least one line", "warn");
-      return;
-    }
-  }
-  const res = await fetch(API + "/bom", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ items: bomCart }),
-  });
-  const data = await res.json();
-  const box = document.getElementById("bom-result");
-  if (!data.success) {
-    box.innerHTML = (data.errors || []).join(", ");
-    box.classList.remove("hidden");
-    return;
-  }
-  const bom = data.bom;
-  let html = `<table class="bom-table"><thead><tr>
-    <th>P/N</th><th>Desc</th><th>Mat</th><th>Qty</th><th>Wt (g)</th><th>Cost</th></tr></thead><tbody>`;
-  bom.lines.forEach(l => {
-    html += `<tr><td>${escapeHtml(l.part_number)}</td><td>${escapeHtml(l.description)}</td>
-      <td>${escapeHtml(l.material)}</td><td>${l.quantity}</td>
-      <td>${l.line_weight_g}</td><td>$${l.line_cost_usd}</td></tr>`;
-  });
-  html += `</tbody></table>
-    <p class="mt"><b>Total:</b> ${bom.totals.total_weight_g} g (${bom.totals.total_weight_kg} kg) ·
-    <b>$${bom.totals.total_cost_usd}</b> · ${bom.totals.part_count} line(s)</p>`;
-  box.innerHTML = html;
-  box.classList.remove("hidden");
-  toast("BOM built");
 }
 
 function escapeHtml(s) {
