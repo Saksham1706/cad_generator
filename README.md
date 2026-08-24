@@ -1,4 +1,4 @@
-# CAD Forge — AI Design Engineer
+# Prompt Based CAD Generator
 
 Generate 3D CAD models from plain English or exact JSON, then analyze, document, and cost them
 in one workspace. Built on CadQuery + FastAPI with a full engineering toolkit in the UI.
