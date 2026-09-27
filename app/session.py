@@ -21,14 +21,14 @@ class SessionStore:
     def _load(self) -> dict:
         if os.path.exists(self.path):
             try:
-                with open(self.path, "r") as f:
+                with open(self.path, "r", encoding="utf-8") as f:
                     return json.load(f)
             except (json.JSONDecodeError, OSError):
                 return {}
         return {}
 
     def _persist(self):
-        with open(self.path, "w") as f:
+        with open(self.path, "w", encoding="utf-8") as f:
             json.dump(self.store, f)
 
     def save(self, session_id: str, params: dict):

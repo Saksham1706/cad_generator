@@ -26,7 +26,21 @@ def _normalize_pattern(pattern):
         ptype = (pattern.get("type") or "single").lower()
         if ptype in ("single", "center", "none", ""):
             return None
-        return pattern
+        out = dict(pattern)
+        out["type"] = ptype
+        for ck in ("count", "count_x", "count_y"):
+            if ck in out and out[ck] is not None:
+                try:
+                    out[ck] = int(float(out[ck]))
+                except (TypeError, ValueError):
+                    pass
+        for pk, pv in list(out.items()):
+            if pk.endswith("_mm") or pk.endswith("_mm4"):
+                try:
+                    out[pk] = float(pv)
+                except (TypeError, ValueError):
+                    pass
+        return out
     if isinstance(pattern, str):
         low = pattern.strip().lower()
         if low in ("single", "center", "none", "one", ""):
@@ -64,6 +78,11 @@ def sanitize_params(params: dict) -> dict:
             if out[key] is None:
                 out.pop(key, None)
 
+    # Engine and validator read sq_hole_pattern; LLM/JSON often says square_hole_pattern.
+    if out.get("square_hole_pattern") and not out.get("sq_hole_pattern"):
+        out["sq_hole_pattern"] = out["square_hole_pattern"]
+    out.pop("square_hole_pattern", None)
+
     if "circ_hole_face" in out:
         out["circ_hole_face"] = _normalize_face(out.get("circ_hole_face"))
     if "sq_hole_face" in out:
@@ -78,13 +97,20 @@ def sanitize_params(params: dict) -> dict:
     # Numeric coercion for common hole fields
     for key in (
         "circ_hole_dia_mm", "circ_hole_depth_mm", "sq_hole_side_mm", "sq_hole_depth_mm",
-        "hole_diameter_mm", "hole_depth_mm", "hole_side_mm",
+        "hole_diameter_mm", "hole_depth_mm", "hole_side_mm", "square_hole_size_mm",
     ):
         if key in out and out[key] is not None:
             try:
                 out[key] = float(out[key])
             except (TypeError, ValueError):
                 out.pop(key, None)
+
+    for key in ("sides", "points", "shelf_count", "leg_count"):
+        if key in out and out[key] is not None:
+            try:
+                out[key] = int(float(out[key]))
+            except (TypeError, ValueError):
+                pass
 
     # Chair / furniture: if user asked for a backrest hole, prefer face=back
     clarified = (out.get("_clarified_as") or "").lower()

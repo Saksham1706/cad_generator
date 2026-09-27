@@ -12,10 +12,20 @@ MARGIN = 30
 TITLEBLOCK_H = 110
 
 
+def _xml_text(value) -> str:
+    return (
+        str(value)
+        .replace("&", "&amp;")
+        .replace("<", "&lt;")
+        .replace(">", "&gt;")
+        .replace('"', "&quot;")
+    )
+
+
 def _export_view_svg(model, projection_dir: tuple, tmp_path: str) -> tuple:
     """Export one orthographic view and return (inner_svg_content, width, height)."""
     cq.exporters.export(model, tmp_path, opt={"projectionDir": projection_dir, "showAxes": False})
-    with open(tmp_path, "r") as f:
+    with open(tmp_path, "r", encoding="utf-8") as f:
         raw = f.read()
 
     width_m = re.search(r'width="([\d.]+)"', raw)
@@ -62,7 +72,7 @@ def _title_block(part_number: str, description: str, material: str, properties: 
     cells = ""
     for label, value in rows:
         cells += f'<text x="10" y="{y}" font-size="11" font-family="monospace" fill="black">' \
-                 f'<tspan font-weight="bold">{label}:</tspan> {value}</text>\n'
+                 f'<tspan font-weight="bold">{_xml_text(label)}:</tspan> {_xml_text(value)}</text>\n'
         y += 14
     return cells
 
@@ -109,7 +119,7 @@ def generate_drawing(model, session_id: str, part_number: str, description: str,
 
     svg_path = f"outputs/{session_id}_drawing.svg"
     pdf_path = f"outputs/{session_id}_drawing.pdf"
-    with open(svg_path, "w") as f:
+    with open(svg_path, "w", encoding="utf-8") as f:
         f.write(sheet)
 
     try:

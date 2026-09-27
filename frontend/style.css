@@ -209,7 +209,7 @@ button:disabled { opacity: 0.4; cursor: not-allowed; }
   margin-bottom: 12px;
 }
 .inline-label { margin-bottom: 0; white-space: nowrap; }
-#material-select, #beam-material { flex: 1; margin-top: 0; }
+#material-select, #json-material, #beam-material { flex: 1; margin-top: 0; }
 
 .form-grid {
   display: grid;
@@ -236,7 +236,30 @@ button:disabled { opacity: 0.4; cursor: not-allowed; }
   font-size: 13px;
 }
 .errors ul { margin-top: 8px; padding-left: 18px; }
+.clarify {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 10px 0;
+  padding: 10px;
+  border: 1px dashed var(--line);
+  border-radius: 8px;
+  background: rgba(61, 155, 106, 0.06);
+}
+.clarify.hidden { display: none; }
 .errors .hint { margin-top: 8px; color: #a8d4b8; }
+.clarify label { font-size: 12px; color: var(--muted); }
+.clarify input, #library-name, #bom-desc {
+  width: 100%;
+  margin-top: 4px;
+  background: var(--bg0);
+  color: var(--text);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 8px 10px;
+  font: inherit;
+}
+.row-inline input[type="text"] { margin-top: 0; }
 
 .hidden { display: none !important; }
 
@@ -587,7 +610,7 @@ model-viewer#viewer {
   color: var(--text);
   cursor: pointer;
 }
-.list-row.as-btn:hover { border-color: var(--accent); }
+.list-row > span:last-child { display: flex; gap: 6px; }
 
 .bom-table {
   width: 100%;
