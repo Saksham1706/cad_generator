@@ -36,16 +36,32 @@ def _face_span(params: dict, face: str = "top") -> tuple:
         return params.get("outer_diameter_mm", 0), params.get("outer_diameter_mm", 0)
     if shape == "torus":
         return params.get("torus_diameter_mm", 0), params.get("torus_diameter_mm", 0)
+    if shape == "table":
+        return params.get("width_mm", 0), params.get("depth_mm", 0)
+    if shape == "chair":
+        return params.get("seat_width_mm", 0), params.get("seat_depth_mm", 0)
+    if shape in ("bookshelf", "phone_stand", "picture_frame"):
+        return params.get("width_mm", 0), params.get("depth_mm", params.get("height_mm", 0))
+    if shape == "bed":
+        return params.get("width_mm", 0), params.get("length_mm", 0)
     return 0, 0
+
+
+# Hole diameters and edge radii are not the part's cross-section.
+_MIN_DIM_SKIP = {
+    "edge_radius_mm", "emboss_depth_mm", "shell_thickness_mm",
+    "wall_mm", "thickness_mm", "border_mm", "rim_mm",
+}
 
 
 def _min_dim(params: dict) -> float:
     vals = []
     for k, v in params.items():
-        if k.endswith("_mm") and isinstance(v, (int, float)) and v > 0:
-            if k in ("emboss_depth_mm",):
-                continue
-            vals.append(v)
+        if not (k.endswith("_mm") and isinstance(v, (int, float)) and v > 0):
+            continue
+        if "hole" in k or k in _MIN_DIM_SKIP:
+            continue
+        vals.append(v)
     return min(vals) if vals else 0
 
 
@@ -125,7 +141,7 @@ def analyze_dfm(params: dict) -> dict:
         pattern = params.get("circ_hole_pattern") or {}
         if not isinstance(pattern, dict):
             pattern = {}
-        if pattern.get("type") == "polar" and pattern.get("radius_mm"):
+        if pattern.get("type") == "polar" and pattern.get("radius_mm") and min(fw, fd) > 0:
             r = pattern["radius_mm"]
             edge_clear = min(fw, fd) / 2 - r - circ / 2
             if edge_clear < MIN_EDGE_CLEARANCE_MM:
@@ -141,13 +157,26 @@ def analyze_dfm(params: dict) -> dict:
                     "message": f"Hole-to-edge clearance ~{edge_clear:.1f}mm looks fine.",
                 })
 
-    sq = params.get("square_hole_size_mm")
-    if sq and sq < MIN_HOLE_DIA_MM:
-        checks.append({
-            "level": "fail",
-            "code": "tiny_square",
-            "message": f"Square hole {sq}mm is too small for clean fabrication.",
-        })
+    sq = params.get("sq_hole_side_mm") or params.get("square_hole_size_mm")
+    if sq:
+        if sq < MIN_HOLE_DIA_MM:
+            checks.append({
+                "level": "fail",
+                "code": "tiny_square",
+                "message": f"Square hole {sq}mm is too small for clean fabrication.",
+            })
+        elif sq < 2.5:
+            checks.append({
+                "level": "warn",
+                "code": "tiny_square",
+                "message": f"Square hole {sq}mm is marginal for a clean print.",
+            })
+        else:
+            checks.append({
+                "level": "ok",
+                "code": "tiny_square",
+                "message": f"Square hole {sq}mm is a practical size.",
+            })
 
     # --- fillets help printability ---
     if params.get("edge_treatment") == "fillet" and params.get("edge_radius_mm"):

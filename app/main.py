@@ -2,7 +2,7 @@ from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import RedirectResponse, FileResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from typing import Optional, Any, Dict, List
 import zipfile
 import io
@@ -27,7 +27,7 @@ from app.params_utils import sanitize_params
 import uuid
 import os
 
-APP_VERSION = "3.1"
+APP_VERSION = "3.2"
 app = FastAPI(title="CAD Forge", version=APP_VERSION)
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 
@@ -92,7 +92,7 @@ class BomLineRequest(BaseModel):
     part_number: Optional[str] = None
     description: Optional[str] = None
     session_id: str
-    quantity: int = 1
+    quantity: int = Field(default=1, ge=1)
 
 
 class BomRequest(BaseModel):
@@ -193,6 +193,23 @@ def _safe_generate(params: dict, session_id: str, material: str = None):
         }
 
 
+def _rebuild(session_id: str, params: dict, material: str = None, save: bool = False, extra: dict = None):
+    """Build (and optionally save) without letting a CAD exception become HTTP 500."""
+    params, result, err = _safe_generate(params, session_id, material=material)
+    if err:
+        return err
+    if save:
+        sessions.save(session_id, params)
+    return _model_response(session_id, params, result, extra)
+
+
+def _validate(params: dict) -> list:
+    try:
+        return validate_geometry(params)
+    except Exception as e:  # noqa: BLE001 — validation must not 500 the API
+        return [f"Could not validate that geometry: {e}"]
+
+
 def _scale_params(params: dict, factor: float) -> dict:
     out = dict(params)
     for k, v in list(out.items()):
@@ -200,15 +217,17 @@ def _scale_params(params: dict, factor: float) -> dict:
             out[k] = round(v * factor, 4)
         elif k.endswith("_mm") is False and k in ("sides", "points"):
             continue
-    # nested patterns
-    for key in ("circ_hole_pattern", "square_hole_pattern"):
+    # nested patterns — engine key is sq_hole_pattern; square_hole_pattern is a legacy alias
+    for key in ("circ_hole_pattern", "sq_hole_pattern", "square_hole_pattern"):
         pat = out.get(key)
         if isinstance(pat, dict):
             new_pat = dict(pat)
             for pk, pv in pat.items():
-                if isinstance(pv, (int, float)) and ("mm" in pk or pk in ("radius_mm", "spacing_mm", "pitch_mm")):
+                if isinstance(pv, (int, float)) and "mm" in pk:
                     new_pat[pk] = round(pv * factor, 4)
             out[key] = new_pat
+    if isinstance(out.get("square_hole_pattern"), dict) and not isinstance(out.get("sq_hole_pattern"), dict):
+        out["sq_hole_pattern"] = out["square_hole_pattern"]
     feats = out.get("text_features")
     if isinstance(feats, list):
         new_feats = []
@@ -248,7 +267,7 @@ async def generate(req: PromptRequest):
             "hint": f"I understood you want a {params.get('shape')} — just need the missing dimensions.",
         }
 
-    errors = validate_geometry(params)
+    errors = _validate(params)
     if errors:
         return {"success": False, "errors": errors}
 
@@ -275,7 +294,7 @@ async def edit(req: EditRequest):
         return {"success": False, "errors": [str(e)]}
 
     params = sanitize_params(params)
-    errors = validate_geometry(params)
+    errors = _validate(params)
     if errors:
         return {"success": False, "errors": errors}
 
@@ -295,7 +314,7 @@ async def generate_manual(req: ManualRequest):
     params = sanitize_params(req.params)
     if params.get("shape") in COMPOUND_BUILDERS:
         params = apply_compound_defaults(params)
-    errors = validate_geometry(params)
+    errors = _validate(params)
     if errors:
         return {"success": False, "errors": errors}
 
@@ -321,8 +340,10 @@ async def undo(req: SessionIdRequest):
     params = sessions.undo(req.session_id)
     if params is None:
         return {"success": False, "errors": ["Nothing to undo."]}
-    result = generate_model(params, req.session_id)
-    return _model_response(req.session_id, params, result)
+    resp = _rebuild(req.session_id, params)
+    if not resp.get("success"):
+        sessions.redo(req.session_id)
+    return resp
 
 
 @app.post("/redo")
@@ -330,17 +351,22 @@ async def redo(req: SessionIdRequest):
     params = sessions.redo(req.session_id)
     if params is None:
         return {"success": False, "errors": ["Nothing to redo."]}
-    result = generate_model(params, req.session_id)
-    return _model_response(req.session_id, params, result)
+    resp = _rebuild(req.session_id, params)
+    if not resp.get("success"):
+        sessions.undo(req.session_id)
+    return resp
 
 
 @app.post("/restore")
 async def restore(req: RestoreRequest):
+    previous = sessions.meta(req.session_id)
     params = sessions.restore_version(req.session_id, req.version_index)
     if params is None:
         return {"success": False, "errors": ["Invalid version index."]}
-    result = generate_model(params, req.session_id)
-    return _model_response(req.session_id, params, result)
+    resp = _rebuild(req.session_id, params)
+    if not resp.get("success") and previous.get("total"):
+        sessions.restore_version(req.session_id, max(0, previous["version"] - 1))
+    return resp
 
 
 @app.post("/clone")
@@ -352,9 +378,7 @@ async def clone(req: CloneRequest):
     new_id = str(uuid.uuid4())[:8]
     if req.material:
         params["material"] = req.material
-    result = generate_model(params, new_id, material=req.material)
-    sessions.save(new_id, params)
-    return _model_response(new_id, params, result, {"cloned_from": req.session_id})
+    return _rebuild(new_id, params, material=req.material, save=True, extra={"cloned_from": req.session_id})
 
 
 @app.post("/scale")
@@ -365,14 +389,12 @@ async def scale(req: ScaleRequest):
     if req.factor <= 0 or req.factor > 100:
         return {"success": False, "errors": ["Scale factor must be between 0 and 100."]}
     params = _scale_params(prev, req.factor)
-    errors = validate_geometry(params)
+    errors = _validate(params)
     if errors:
         return {"success": False, "errors": errors}
     if req.material:
         params["material"] = req.material
-    result = generate_model(params, req.session_id, material=req.material)
-    sessions.save(req.session_id, params)
-    return _model_response(req.session_id, params, result)
+    return _rebuild(req.session_id, params, material=req.material, save=True)
 
 
 @app.get("/history/{session_id}")
@@ -435,7 +457,9 @@ async def compare_materials(req: MaterialCompareRequest):
     params = sessions.get(req.session_id)
     if not params:
         return {"success": False, "errors": ["Unknown session."]}
-    result = generate_model(params, req.session_id)
+    params, result, err = _safe_generate(params, req.session_id)
+    if err:
+        return err
     vol = result["properties"]["volume_mm3"]
     ids = req.materials or list(MATERIALS.keys())
     rows = []
@@ -495,14 +519,12 @@ async def beam_to_cad(req: BeamToCadRequest):
     else:
         return {"success": False, "errors": ["Provide diameter_mm or width_mm + height_mm."]}
 
-    errors = validate_geometry(params)
+    errors = _validate(params)
     if errors:
         return {"success": False, "errors": errors}
 
     session_id = str(uuid.uuid4())[:8]
-    result = generate_model(params, session_id, material=req.material)
-    sessions.save(session_id, params)
-    return _model_response(session_id, params, result)
+    return _rebuild(session_id, params, material=req.material, save=True)
 
 
 @app.get("/structural_materials")
@@ -517,7 +539,9 @@ async def bom(req: BomRequest):
         params = sessions.get(line.session_id)
         if not params:
             return {"success": False, "errors": [f"Unknown session_id: {line.session_id}"]}
-        result = generate_model(params, line.session_id)
+        params, result, err = _safe_generate(params, line.session_id)
+        if err:
+            return err
         items.append({
             "part_number": line.part_number or line.session_id,
             "description": line.description or params.get("shape", "part"),
@@ -533,16 +557,22 @@ async def drawing(req: DrawingRequest):
     if not params:
         return {"success": False, "errors": [f"Unknown session_id: {req.session_id}"]}
 
-    result = generate_model(params, req.session_id)
-    model = build_final_model(params)
+    params, result, err = _safe_generate(params, req.session_id)
+    if err:
+        return err
 
-    files = generate_drawing(
-        model, req.session_id,
-        part_number=req.part_number or req.session_id,
-        description=req.description or params.get("shape", "part"),
-        material=result["properties"]["material"],
-        properties=result["properties"],
-    )
+    try:
+        model = build_final_model(params)
+        files = generate_drawing(
+            model, req.session_id,
+            part_number=req.part_number or req.session_id,
+            description=req.description or params.get("shape", "part"),
+            material=result["properties"]["material"],
+            properties=result["properties"],
+        )
+    except Exception as e:  # noqa: BLE001
+        print(f"Drawing error: {e}")
+        return {"success": False, "errors": [f"Could not create drawing: {e}"]}
     return {
         "success": True,
         "svg_url": f"/outputs/{req.session_id}_drawing.svg",
@@ -560,7 +590,10 @@ async def dfm(req: DfmRequest):
             return {"success": False, "errors": ["Unknown session."]}
     else:
         return {"success": False, "errors": ["Provide session_id or params."]}
-    return {"success": True, "dfm": analyze_dfm(params)}
+    try:
+        return {"success": True, "dfm": analyze_dfm(sanitize_params(params))}
+    except Exception as e:  # noqa: BLE001
+        return {"success": False, "errors": [f"DFM check failed: {e}"]}
 
 
 @app.get("/fasteners")
@@ -583,14 +616,12 @@ async def apply_bolt_circle(req: BoltCircleRequest):
     params = dict(prev)
     params.update({k: v for k, v in fragment.items() if not k.startswith("_")})
     params["_fastener"] = fragment.get("_fastener")
-    errors = validate_geometry(params)
+    errors = _validate(params)
     if errors:
         return {"success": False, "errors": errors}
     if req.material:
         params["material"] = req.material
-    result = generate_model(params, req.session_id, material=req.material)
-    sessions.save(req.session_id, params)
-    return _model_response(req.session_id, params, result)
+    return _rebuild(req.session_id, params, material=req.material, save=True)
 
 
 @app.get("/library")
@@ -622,13 +653,11 @@ async def library_load(req: LibraryLoadRequest):
     params = dict(item["params"])
     if req.material:
         params["material"] = req.material
-    errors = validate_geometry(params)
+    errors = _validate(params)
     if errors:
         return {"success": False, "errors": errors}
     session_id = str(uuid.uuid4())[:8]
-    result = generate_model(params, session_id, material=req.material)
-    sessions.save(session_id, params)
-    return _model_response(session_id, params, result, {"library_part": item["name"]})
+    return _rebuild(session_id, params, material=req.material, save=True, extra={"library_part": item["name"]})
 
 
 @app.delete("/library/{part_id}")
@@ -646,8 +675,9 @@ async def export_pack(session_id: str):
     if not params:
         return {"success": False, "errors": ["Unknown session."]}
 
-    # Ensure files exist
-    generate_model(params, session_id)
+    params, _result, err = _safe_generate(params, session_id)
+    if err:
+        return err
 
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:

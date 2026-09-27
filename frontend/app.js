@@ -1,4 +1,4 @@
-console.log("CAD Forge app.js v10");
+console.log("CAD Forge app.js v11");
 const API = window.location.origin.includes("null") || window.location.protocol === "file:"
   ? "http://127.0.0.1:8000"
   : window.location.origin;
@@ -13,6 +13,7 @@ let jsonMode = false;
 let lastBeamPayload = null;
 let allTemplates = [];
 let autoRotateOn = true;
+let bomLines = [];
 
 const EDITABLE_KEYS = [
   "shape", "width_mm", "height_mm", "depth_mm", "diameter_mm",
@@ -31,6 +32,9 @@ document.addEventListener("DOMContentLoaded", () => {
   loadTemplates();
   loadMaterials();
   loadStructuralMaterials();
+  loadFasteners();
+  loadLibrary();
+  syncAutoRotateButton();
   restoreFromUrl();
   bindShortcuts();
 });
@@ -63,23 +67,40 @@ function setLoading(on, text) {
   overlay.classList.toggle("hidden", !on);
 }
 
+function isTypingTarget(e) {
+  const tag = ((e.target || {}).tagName || "");
+  return tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || (e.target && e.target.isContentEditable);
+}
+
+function isBusy() {
+  const overlay = document.getElementById("loading-overlay");
+  return overlay && !overlay.classList.contains("hidden");
+}
+
 function bindShortcuts() {
   document.addEventListener("keydown", (e) => {
-    if ((e.ctrlKey || e.metaKey) && e.key === "Enter") {
+    if (isBusy()) return;
+    const key = (e.key || "").toLowerCase();
+    if ((e.ctrlKey || e.metaKey) && key === "enter") {
       e.preventDefault();
-      if (jsonMode) generateManual();
-      else if (document.activeElement && document.activeElement.id === "edit-prompt") editModel();
-      else generate();
+      const editFocused = document.activeElement && document.activeElement.id === "edit-prompt";
+      if (editFocused) {
+        if (!document.getElementById("edit-btn").disabled) editModel();
+      } else if (jsonMode) {
+        if (!document.getElementById("json-generate-btn").disabled) generateManual();
+      } else if (!document.getElementById("generate-btn").disabled) {
+        generate();
+      }
     }
-    if ((e.ctrlKey || e.metaKey) && e.key === "z" && !e.shiftKey) {
-      if (["INPUT", "TEXTAREA"].includes((e.target || {}).tagName)) return;
+    if ((e.ctrlKey || e.metaKey) && key === "z" && !e.shiftKey) {
+      if (isTypingTarget(e)) return;
       e.preventDefault();
-      doUndo();
+      if (!document.getElementById("undo-btn").disabled) doUndo();
     }
-    if ((e.ctrlKey || e.metaKey) && (e.key === "y" || (e.key === "z" && e.shiftKey))) {
-      if (["INPUT", "TEXTAREA"].includes((e.target || {}).tagName)) return;
+    if ((e.ctrlKey || e.metaKey) && (key === "y" || (key === "z" && e.shiftKey))) {
+      if (isTypingTarget(e)) return;
       e.preventDefault();
-      doRedo();
+      if (!document.getElementById("redo-btn").disabled) doRedo();
     }
   });
 }
@@ -106,6 +127,18 @@ function copyShareLink() {
   });
 }
 
+function errorList(data) {
+  if (!data) return ["Request failed"];
+  if (Array.isArray(data.errors) && data.errors.filter(Boolean).length) {
+    return data.errors.filter(Boolean);
+  }
+  if (Array.isArray(data.detail)) {
+    return data.detail.map(d => (d && (d.msg || d.message)) || JSON.stringify(d));
+  }
+  if (typeof data.detail === "string") return [data.detail];
+  return ["Request failed"];
+}
+
 async function restoreFromUrl() {
   const params = new URLSearchParams(window.location.search);
   const sid = params.get("session");
@@ -113,18 +146,20 @@ async function restoreFromUrl() {
   try {
     setLoading(true, "Restoring session…");
     const res = await fetch(API + "/history/" + sid);
-    const data = await res.json();
-    if (!data.history || !data.history.length) return;
-    const latest = data.history[data.history.length - 1];
-    const man = await fetch(API + "/generate_manual", {
+    const data = await parseJsonResponse(res);
+    if (!data.history || !data.history.length) {
+      toast("No saved model for that link", "warn");
+      return;
+    }
+    const index = Math.max(0, (data.version || data.history.length) - 1);
+    const man = await fetch(API + "/restore", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ params: latest, session_id: sid }),
+      body: JSON.stringify({ session_id: sid, version_index: index }),
     });
-    handleResponse(await man.json());
-    toast("Restored session " + sid);
+    handleResponse(await parseJsonResponse(man), "Restore");
   } catch (err) {
-    console.error(err);
+    toast(err.message || "Could not restore that session", "err");
   } finally {
     setLoading(false);
   }
@@ -232,13 +267,16 @@ async function loadMaterials() {
     const res = await fetch(API + "/materials");
     const data = await res.json();
     const select = document.getElementById("material-select");
+    const jsonSelect = document.getElementById("json-material");
     select.innerHTML = "";
+    if (jsonSelect) jsonSelect.innerHTML = "";
     data.materials.forEach(m => {
       const opt = document.createElement("option");
       opt.value = m.id;
       opt.textContent = `${m.label} · ${m.density_g_cm3} g/cm³ · $${m.cost_per_kg}/kg`;
       if (m.id === data.default) opt.selected = true;
       select.appendChild(opt);
+      if (jsonSelect) jsonSelect.appendChild(opt.cloneNode(true));
     });
   } catch (err) {
     console.error("materials:", err);
@@ -371,12 +409,17 @@ async function generateManual() {
   btn.disabled = true;
   setLoading(true, "Building from JSON…");
   try {
+    const body = { params, session_id: currentSession || undefined };
+    if (!params.material) {
+      const jsonMat = document.getElementById("json-material");
+      body.material = (jsonMat && jsonMat.value) || currentMaterial();
+    }
     const res = await fetch(API + "/generate_manual", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ params, material: currentMaterial(), session_id: currentSession || undefined }),
+      body: JSON.stringify(body),
     });
-    handleResponse(await parseJsonResponse(res));
+    handleResponse(await parseJsonResponse(res), "JSON build");
   } catch (err) {
     showError(err.message || "Could not reach the server.");
   }
@@ -415,7 +458,7 @@ async function editModel() {
 }
 
 async function doUndo() {
-  if (!currentSession) return;
+  if (!currentSession || document.getElementById("undo-btn").disabled) return;
   setLoading(true, "Undo…");
   try {
     const res = await fetch(API + "/undo", {
@@ -423,14 +466,16 @@ async function doUndo() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ session_id: currentSession }),
     });
-    handleResponse(await res.json());
+    handleResponse(await parseJsonResponse(res), "Undo");
+  } catch (err) {
+    toast(err.message || "Undo failed", "err");
   } finally {
     setLoading(false);
   }
 }
 
 async function doRedo() {
-  if (!currentSession) return;
+  if (!currentSession || document.getElementById("redo-btn").disabled) return;
   setLoading(true, "Redo…");
   try {
     const res = await fetch(API + "/redo", {
@@ -438,7 +483,9 @@ async function doRedo() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ session_id: currentSession }),
     });
-    handleResponse(await res.json());
+    handleResponse(await parseJsonResponse(res), "Redo");
+  } catch (err) {
+    toast(err.message || "Redo failed", "err");
   } finally {
     setLoading(false);
   }
@@ -508,12 +555,19 @@ function syncViewerToMaterial(matId) {
   setMaterial(p[1], p[2]);
 }
 
+function syncAutoRotateButton() {
+  const btn = document.getElementById("auto-rotate-btn");
+  if (btn) btn.classList.toggle("active", autoRotateOn);
+}
+
 function toggleAutoRotate() {
   const viewer = document.getElementById("viewer");
   autoRotateOn = !autoRotateOn;
-  if (autoRotateOn) viewer.setAttribute("auto-rotate", "");
-  else viewer.removeAttribute("auto-rotate");
-  document.getElementById("auto-rotate-btn").classList.toggle("active", autoRotateOn);
+  if (viewer) {
+    if (autoRotateOn) viewer.setAttribute("auto-rotate", "");
+    else viewer.removeAttribute("auto-rotate");
+  }
+  syncAutoRotateButton();
 }
 
 function resetCamera() {
@@ -531,19 +585,71 @@ function resetCamera() {
 // ---------------------------------------------------------------------
 // Response handling
 // ---------------------------------------------------------------------
-function handleResponse(data) {
+function showClarification(data) {
+  const box = document.getElementById("clarify-box");
+  if (!box) return;
+  const partial = data && data.partial_params;
+  const missing = (partial && partial.missing_fields) || [];
+  if (!partial || !missing.length) {
+    box.classList.add("hidden");
+    box.innerHTML = "";
+    return;
+  }
+  box.classList.remove("hidden");
+  box.innerHTML = `<p class="hint">${escapeHtml(data.hint || "Add the missing dimensions.")}</p>` +
+    missing.map(f => `<label>${escapeHtml(f)}<input type="number" min="0.1" step="0.1" data-miss="${escapeHtml(f)}"></label>`).join("") +
+    `<button type="button" class="btn-primary" id="clarify-build">Build with these sizes</button>`;
+  document.getElementById("clarify-build").onclick = () => submitClarification(partial);
+}
+
+async function submitClarification(partial) {
+  const params = JSON.parse(JSON.stringify(partial));
+  let complete = true;
+  document.querySelectorAll("#clarify-box input").forEach(input => {
+    const v = parseFloat(input.value);
+    if (!input.value || Number.isNaN(v) || v <= 0) complete = false;
+    else params[input.dataset.miss] = v;
+  });
+  if (!complete) {
+    toast("Fill every missing dimension", "warn");
+    return;
+  }
+  delete params.missing_fields;
+  setLoading(true, "Building…");
+  try {
+    const res = await fetch(API + "/generate_manual", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        params,
+        material: params.material || currentMaterial(),
+        session_id: currentSession || undefined,
+      }),
+    });
+    handleResponse(await parseJsonResponse(res), "Build");
+  } catch (err) {
+    toast(err.message || "Could not build", "err");
+  } finally {
+    setLoading(false);
+  }
+}
+
+function handleResponse(data, op) {
   const errBox = document.getElementById("errors");
-  if (!data.success) {
+  if (!data || data.success !== true) {
+    const messages = errorList(data);
     let html = "<b>Fix these issues:</b><ul>" +
-      (data.errors || []).filter(Boolean).map(e => "<li>" + escapeHtml(e) + "</li>").join("") + "</ul>";
-    if (data.hint) html += '<p class="hint">' + escapeHtml(data.hint) + "</p>";
+      messages.map(e => "<li>" + escapeHtml(e) + "</li>").join("") + "</ul>";
+    if (data && data.hint) html += '<p class="hint">' + escapeHtml(data.hint) + "</p>";
     errBox.innerHTML = html;
     errBox.classList.remove("hidden");
-    toast("Generation failed", "err");
-    return;
+    showClarification(data);
+    toast((op || "Generation") + " failed", "err");
+    return false;
   }
 
   errBox.classList.add("hidden");
+  showClarification(null);
   if (data.session_id) currentSession = data.session_id;
   currentParams = data.params || {};
   currentProps = data.properties || {};
@@ -564,6 +670,7 @@ function handleResponse(data) {
   newViewer.setAttribute("exposure", "0.85");
   newViewer.setAttribute("src", glbUrl + "?t=" + Date.now());
   parent.insertBefore(newViewer, parent.firstChild);
+  syncAutoRotateButton();
 
   document.getElementById("dl-glb").href = glbUrl;
   document.getElementById("dl-stl").href = API + data.stl_url;
@@ -601,6 +708,10 @@ function handleResponse(data) {
     if (sel && [...sel.options].some(o => o.value === cleanParams.material)) {
       sel.value = cleanParams.material;
     }
+    const jsonSel = document.getElementById("json-material");
+    if (jsonSel && [...jsonSel.options].some(o => o.value === cleanParams.material)) {
+      jsonSel.value = cleanParams.material;
+    }
   }
 
   renderProperties(data.properties);
@@ -609,7 +720,9 @@ function handleResponse(data) {
   renderHistoryControls(data);
   renderInspector(cleanParams);
   syncViewerToMaterial(cleanParams.material || currentMaterial());
-  toast("Model ready · " + (cleanParams.shape || "part"));
+  const shape = cleanParams.shape || "part";
+  toast(op ? (op + " complete") : ("Model ready · " + shape));
+  return true;
 }
 
 function renderProperties(props) {
@@ -699,7 +812,10 @@ async function toggleHistoryPanel() {
     btn.type = "button";
     btn.className = "history-item" + (i === (data.version - 1) ? " active" : "");
     const shape = p.shape || "?";
-    const note = p._clarified_as || Object.keys(p).filter(k => !k.startsWith("_")).slice(0, 3).join(", ");
+    const note = p._clarified_as || ["width_mm", "depth_mm", "height_mm", "diameter_mm"]
+      .filter(k => p[k] != null)
+      .map(k => k.replace("_mm", "") + " " + p[k])
+      .join(", ");
     btn.textContent = `v${i + 1} · ${shape} — ${note}`.slice(0, 80);
     btn.onclick = () => restoreVersion(i);
     panel.appendChild(btn);
@@ -715,8 +831,11 @@ async function restoreVersion(index) {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ session_id: currentSession, version_index: index }),
     });
-    handleResponse(await res.json());
-    document.getElementById("history-panel").classList.add("hidden");
+    if (handleResponse(await parseJsonResponse(res), "Restore")) {
+      document.getElementById("history-panel").classList.add("hidden");
+    }
+  } catch (err) {
+    toast(err.message || "Restore failed", "err");
   } finally {
     setLoading(false);
   }
@@ -751,9 +870,15 @@ async function applyInspector() {
   const params = JSON.parse(JSON.stringify(currentParams));
   document.querySelectorAll("#inspector-fields input").forEach(input => {
     const k = input.dataset.key;
-    let v = input.value;
-    if (input.type === "number") v = parseFloat(v);
-    params[k] = v;
+    const raw = input.value.trim();
+    if (raw === "") return;
+    if (input.type === "number") {
+      const v = parseFloat(raw);
+      if (Number.isNaN(v)) return;
+      params[k] = v;
+    } else {
+      params[k] = raw;
+    }
   });
   setLoading(true, "Rebuilding…");
   try {
@@ -762,7 +887,9 @@ async function applyInspector() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ params, material: params.material || currentMaterial(), session_id: currentSession }),
     });
-    handleResponse(await res.json());
+    handleResponse(await parseJsonResponse(res), "Rebuild");
+  } catch (err) {
+    toast(err.message || "Rebuild failed", "err");
   } finally {
     setLoading(false);
   }
@@ -816,53 +943,64 @@ async function runBeamCalc() {
   }
   lastBeamPayload = payload;
 
-  const res = await fetch(API + "/calculate_beam", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(payload),
-  });
-  const data = await res.json();
   const box = document.getElementById("beam-result");
-  if (!data.success) {
-    box.innerHTML = "<b>Error:</b> " + (data.errors || []).join(", ");
-    box.classList.remove("hidden");
-    return;
-  }
-  const r = data.result;
-  const sectionDesc = (r.inputs && r.inputs.section) || "—";
-  let html = `
-    <div class="stat-grid">
-      <div><span class="prop-label">Max stress</span><div class="prop-value">${r.max_bending_stress_mpa} MPa</div></div>
-      <div><span class="prop-label">Section</span><div class="prop-value sm">${sectionDesc}</div></div>
-      <div><span class="prop-label">I</span><div class="prop-value sm">${r.section_properties.I_mm4} mm⁴</div></div>
-    </div>`;
-  if (r.material) {
-    const c = r.material;
-    html += `<p class="mt">Material <b>${c.label || c.id}</b> — FoS <b>${c.factor_of_safety}</b>, deflection <b>${c.deflection_mm} mm</b>
-      ${c.passes_min_fos ? '<span class="tag ok">PASS</span>' : '<span class="tag fail">FAIL</span>'}</p>`;
-  }
-  if (r.recommended_materials && r.recommended_materials.length) {
-    html += "<p class='mt'><b>Recommended (cheapest OK):</b></p><ul>";
-    r.recommended_materials.slice(0, 4).forEach(m => {
-      html += `<li>${m.label} — FoS ${m.fos}, defl. ${m.deflection_mm}mm, $${m.cost_per_kg}/kg</li>`;
+  try {
+    const res = await fetch(API + "/calculate_beam", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
     });
-    html += "</ul>";
+    const data = await parseJsonResponse(res);
+    if (!data.success) {
+      box.innerHTML = "<b>Error:</b> " + errorList(data).map(escapeHtml).join(", ");
+      box.classList.remove("hidden");
+      toast("Beam analysis failed", "err");
+      return false;
+    }
+    const r = data.result;
+    const sectionDesc = (r.inputs && r.inputs.section) || "—";
+    let html = `
+      <div class="stat-grid">
+        <div><span class="prop-label">Max stress</span><div class="prop-value">${r.max_bending_stress_mpa} MPa</div></div>
+        <div><span class="prop-label">Section</span><div class="prop-value sm">${sectionDesc}</div></div>
+        <div><span class="prop-label">I</span><div class="prop-value sm">${r.section_properties.I_mm4} mm⁴</div></div>
+      </div>`;
+    if (r.material) {
+      const c = r.material;
+      html += `<p class="mt">Material <b>${c.label || c.id}</b> — FoS <b>${c.factor_of_safety}</b>, deflection <b>${c.deflection_mm} mm</b>
+        ${c.passes_min_fos ? '<span class="tag ok">PASS</span>' : '<span class="tag fail">FAIL</span>'}</p>`;
+    }
+    if (r.recommended_materials && r.recommended_materials.length) {
+      html += "<p class='mt'><b>Recommended (cheapest OK):</b></p><ul>";
+      r.recommended_materials.slice(0, 4).forEach(m => {
+        html += `<li>${m.label} — FoS ${m.fos}, defl. ${m.deflection_mm}mm, $${m.cost_per_kg}/kg</li>`;
+      });
+      html += "</ul>";
+    }
+    if (r.warning) html += `<p class="mt" style="color:#f0b0a0">${escapeHtml(r.warning)}</p>`;
+    html += `<p class="mt muted">Formula: ${escapeHtml(r.deflection_formula || "")} · M<sub>max</sub> ${r.max_bending_moment_Nmm} N·mm</p>`;
+    box.innerHTML = html;
+    box.classList.remove("hidden");
+    toast("Beam analysis complete");
+    return true;
+  } catch (err) {
+    box.innerHTML = "<b>Error:</b> " + escapeHtml(err.message || "Could not reach the server");
+    box.classList.remove("hidden");
+    toast("Beam analysis failed", "err");
+    return false;
   }
-  if (r.warning) html += `<p class="mt" style="color:#f0b0a0">${r.warning}</p>`;
-  html += `<p class="mt muted">Formula: ${r.deflection_formula || ""} · M<sub>max</sub> ${r.max_bending_moment_Nmm} N·mm</p>`;
-  box.innerHTML = html;
-  box.classList.remove("hidden");
-  toast("Beam analysis complete");
 }
 
 async function beamToCad() {
   if (!lastBeamPayload) {
-    await runBeamCalc();
+    const ok = await runBeamCalc();
+    if (!ok) return;
   }
   const p = lastBeamPayload || {};
+  const chosen = document.getElementById("beam-material").value;
   const body = {
     span_mm: p.span_mm || +document.getElementById("beam-span").value,
-    material: "steel",
+    material: chosen || p.material || "steel",
   };
   if (p.diameter_mm || document.getElementById("beam-section").value === "circ") {
     body.diameter_mm = p.diameter_mm || +document.getElementById("beam-d").value;
@@ -877,9 +1015,11 @@ async function beamToCad() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
     });
-    handleResponse(await res.json());
-    switchTab("design");
-    toast("CAD beam generated from analysis");
+    if (handleResponse(await parseJsonResponse(res), "Beam CAD")) {
+      switchTab("design");
+    }
+  } catch (err) {
+    toast(err.message || "Beam CAD failed", "err");
   } finally {
     setLoading(false);
   }
@@ -905,24 +1045,359 @@ async function generateDrawing() {
         description: (currentParams && currentParams.shape) || "part",
       }),
     });
-    const data = await res.json();
+    const data = await parseJsonResponse(res);
     if (!data.success) {
-      toast((data.errors || ["Drawing failed"]).join(", "), "err");
+      toast(errorList(data).join(", "), "err");
       return;
     }
     window.open(API + data.svg_url, "_blank");
     toast("Drawing ready");
+  } catch (err) {
+    toast(err.message || "Drawing failed", "err");
   } finally {
     setLoading(false);
   }
 }
 
-function downloadPack() {
+async function downloadPack() {
   if (!currentSession) {
     toast("Generate a part first", "warn");
     return;
   }
-  window.location.href = API + "/export_pack/" + currentSession;
+  setLoading(true, "Packing ZIP…");
+  try {
+    const res = await fetch(API + "/export_pack/" + currentSession);
+    const ctype = res.headers.get("content-type") || "";
+    if (!res.ok || ctype.includes("application/json") || ctype.includes("text/")) {
+      let data = {};
+      try { data = await res.json(); } catch { /* not json */ }
+      toast(errorList(data).join(", "), "err");
+      return;
+    }
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = currentSession + "_cad_pack.zip";
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+    toast("ZIP pack downloaded");
+  } catch (err) {
+    toast(err.message || "Download failed", "err");
+  } finally {
+    setLoading(false);
+  }
+}
+
+function requireSession() {
+  if (!currentSession) {
+    toast("Generate a model first", "warn");
+    return false;
+  }
+  return true;
+}
+
+async function scaleModel() {
+  if (!requireSession()) return;
+  const factor = parseFloat(document.getElementById("scale-factor").value);
+  if (!(factor > 0) || factor > 100) {
+    toast("Scale factor must be between 0 and 100", "warn");
+    return;
+  }
+  setLoading(true, "Scaling…");
+  try {
+    const res = await fetch(API + "/scale", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ session_id: currentSession, factor }),
+    });
+    if (handleResponse(await parseJsonResponse(res), "Scale")) switchTab("design");
+  } catch (err) {
+    toast(err.message || "Scale failed", "err");
+  } finally {
+    setLoading(false);
+  }
+}
+
+async function cloneModel() {
+  if (!requireSession()) return;
+  setLoading(true, "Cloning…");
+  try {
+    const res = await fetch(API + "/clone", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ session_id: currentSession }),
+    });
+    if (handleResponse(await parseJsonResponse(res), "Clone")) switchTab("design");
+  } catch (err) {
+    toast(err.message || "Clone failed", "err");
+  } finally {
+    setLoading(false);
+  }
+}
+
+async function loadFasteners() {
+  try {
+    const res = await fetch(API + "/fasteners");
+    const data = await res.json();
+    const select = document.getElementById("fastener-select");
+    if (!select) return;
+    select.innerHTML = "";
+    (data.fasteners || []).forEach(f => {
+      const opt = document.createElement("option");
+      opt.value = f.id;
+      opt.textContent = `${f.id} · clearance ${f.clearance_mm}mm`;
+      if (f.id === "M4") opt.selected = true;
+      select.appendChild(opt);
+    });
+  } catch (err) {
+    console.error("fasteners:", err);
+  }
+}
+
+async function applyBoltCircle() {
+  if (!requireSession()) return;
+  const pitchRaw = document.getElementById("bolt-pitch").value;
+  const body = {
+    session_id: currentSession,
+    fastener: document.getElementById("fastener-select").value || "M4",
+    count: Math.max(1, parseInt(document.getElementById("bolt-count").value, 10) || 6),
+    hole_type: document.getElementById("bolt-type").value,
+    face: document.getElementById("bolt-face").value,
+  };
+  if (pitchRaw) body.pitch_diameter_mm = parseFloat(pitchRaw);
+  setLoading(true, "Applying bolt circle…");
+  try {
+    const res = await fetch(API + "/apply_bolt_circle", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    if (handleResponse(await parseJsonResponse(res), "Bolt circle")) switchTab("design");
+  } catch (err) {
+    toast(err.message || "Bolt circle failed", "err");
+  } finally {
+    setLoading(false);
+  }
+}
+
+async function compareMaterials() {
+  if (!requireSession()) return;
+  setLoading(true, "Comparing materials…");
+  try {
+    const res = await fetch(API + "/compare_materials", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ session_id: currentSession }),
+    });
+    const data = await parseJsonResponse(res);
+    const box = document.getElementById("compare-result");
+    if (!data.success) {
+      box.innerHTML = "<b>Error:</b> " + errorList(data).map(escapeHtml).join(", ");
+      box.classList.remove("hidden");
+      toast("Compare failed", "err");
+      return;
+    }
+    let html = `<p class="muted">Volume ${data.volume_mm3} mm³ · cheapest first</p><table class="bom-table"><tr><th>Material</th><th>Weight</th><th>Cost</th></tr>`;
+    (data.materials || []).forEach(m => {
+      html += `<tr><td>${escapeHtml(m.label)}</td><td>${m.weight_g} g</td><td>$${m.cost_usd}</td></tr>`;
+    });
+    html += "</table>";
+    box.innerHTML = html;
+    box.classList.remove("hidden");
+    toast("Material comparison ready");
+  } catch (err) {
+    toast(err.message || "Compare failed", "err");
+  } finally {
+    setLoading(false);
+  }
+}
+
+async function loadLibrary() {
+  const host = document.getElementById("library-list");
+  if (!host) return;
+  try {
+    const res = await fetch(API + "/library");
+    const data = await res.json();
+    host.innerHTML = "";
+    const parts = data.parts || [];
+    if (!parts.length) {
+      host.innerHTML = '<p class="muted">No saved parts yet.</p>';
+      return;
+    }
+    parts.forEach(part => {
+      const row = document.createElement("div");
+      row.className = "list-row";
+      const label = document.createElement("span");
+      label.textContent = part.name;
+      const actions = document.createElement("span");
+      const loadBtn = document.createElement("button");
+      loadBtn.type = "button";
+      loadBtn.className = "btn-ghost sm";
+      loadBtn.textContent = "Load";
+      loadBtn.onclick = () => loadLibraryPart(part.id);
+      const delBtn = document.createElement("button");
+      delBtn.type = "button";
+      delBtn.className = "btn-ghost sm";
+      delBtn.textContent = "Delete";
+      delBtn.onclick = () => deleteLibraryPart(part.id);
+      actions.appendChild(loadBtn);
+      actions.appendChild(delBtn);
+      row.appendChild(label);
+      row.appendChild(actions);
+      host.appendChild(row);
+    });
+  } catch (err) {
+    host.innerHTML = '<p class="muted">Library unavailable.</p>';
+  }
+}
+
+async function saveToLibrary() {
+  if (!requireSession()) return;
+  const name = document.getElementById("library-name").value.trim();
+  if (!name) {
+    toast("Name the part first", "warn");
+    return;
+  }
+  try {
+    const res = await fetch(API + "/library/save", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name, session_id: currentSession }),
+    });
+    const data = await parseJsonResponse(res);
+    if (!data.success) {
+      toast(errorList(data).join(", "), "err");
+      return;
+    }
+    toast("Saved “" + name + "”");
+    loadLibrary();
+  } catch (err) {
+    toast(err.message || "Save failed", "err");
+  }
+}
+
+async function loadLibraryPart(partId) {
+  setLoading(true, "Loading library part…");
+  try {
+    const res = await fetch(API + "/library/load", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ part_id: partId }),
+    });
+    if (handleResponse(await parseJsonResponse(res), "Library")) switchTab("design");
+  } catch (err) {
+    toast(err.message || "Load failed", "err");
+  } finally {
+    setLoading(false);
+  }
+}
+
+async function deleteLibraryPart(partId) {
+  try {
+    const res = await fetch(API + "/library/" + partId, { method: "DELETE" });
+    const data = await parseJsonResponse(res);
+    if (!data.success) {
+      toast(errorList(data).join(", "), "err");
+      return;
+    }
+    toast("Part removed");
+    loadLibrary();
+  } catch (err) {
+    toast(err.message || "Delete failed", "err");
+  }
+}
+
+function renderBomLines() {
+  const host = document.getElementById("bom-lines");
+  if (!host) return;
+  host.innerHTML = "";
+  if (!bomLines.length) {
+    host.innerHTML = '<p class="muted">No lines yet.</p>';
+    return;
+  }
+  bomLines.forEach((line, i) => {
+    const row = document.createElement("div");
+    row.className = "list-row";
+    row.innerHTML = `<span>${escapeHtml(line.description)} × ${line.quantity}</span>`;
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "btn-ghost sm";
+    btn.textContent = "Remove";
+    btn.onclick = () => {
+      bomLines.splice(i, 1);
+      renderBomLines();
+      refreshBom();
+    };
+    row.appendChild(btn);
+    host.appendChild(row);
+  });
+}
+
+async function refreshBom() {
+  const box = document.getElementById("bom-result");
+  if (!bomLines.length) {
+    box.classList.add("hidden");
+    box.innerHTML = "";
+    return;
+  }
+  try {
+    const res = await fetch(API + "/bom", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        items: bomLines.map(line => ({
+          session_id: line.session_id,
+          quantity: line.quantity,
+          description: line.description,
+          part_number: line.session_id,
+        })),
+      }),
+    });
+    const data = await parseJsonResponse(res);
+    if (!data.success) {
+      box.innerHTML = "<b>Error:</b> " + errorList(data).map(escapeHtml).join(", ");
+      box.classList.remove("hidden");
+      return;
+    }
+    const bom = data.bom || {};
+    const lines = bom.lines || bom.items || [];
+    let html = `<table class="bom-table"><tr><th>Part</th><th>Qty</th><th>Weight</th><th>Cost</th></tr>`;
+    lines.forEach(line => {
+      html += `<tr><td>${escapeHtml(line.description || line.part_number || "")}</td><td>${line.quantity}</td><td>${line.line_weight_g} g</td><td>$${line.line_cost_usd}</td></tr>`;
+    });
+    html += "</table>";
+    const totals = bom.totals || bom;
+    if (totals.total_weight_g != null || totals.total_cost_usd != null) {
+      html += `<p class="mt"><b>Total</b> ${totals.total_weight_g ?? "—"} g · $${totals.total_cost_usd ?? "—"}</p>`;
+    }
+    box.innerHTML = html;
+    box.classList.remove("hidden");
+  } catch (err) {
+    box.innerHTML = "<b>Error:</b> " + escapeHtml(err.message || "BOM failed");
+    box.classList.remove("hidden");
+  }
+}
+
+function addBomLine() {
+  if (!requireSession()) return;
+  const qty = Math.max(1, parseInt(document.getElementById("bom-qty").value, 10) || 1);
+  const desc = document.getElementById("bom-desc").value.trim()
+    || (currentParams && currentParams.shape)
+    || currentSession;
+  const existing = bomLines.find(line => line.session_id === currentSession && line.description === desc);
+  if (existing) existing.quantity += qty;
+  else bomLines.push({ session_id: currentSession, quantity: qty, description: desc });
+  renderBomLines();
+  refreshBom();
+}
+
+function clearBom() {
+  bomLines = [];
+  renderBomLines();
+  refreshBom();
 }
 
 function escapeHtml(s) {

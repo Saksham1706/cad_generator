@@ -9,6 +9,7 @@ model without exposing each one as a UI template button.
 from typing import Optional
 
 import math
+import re
 import cadquery as cq
 
 
@@ -490,7 +491,7 @@ COMPOUND_DEFAULTS = {
 COMPOUND_ALIASES = {
     "water_bottle": ["water bottle", "bottle", "flask", "sports bottle", "drink bottle"],
     "mug": ["mug", "coffee mug", "coffee cup", "tea cup", "cup with handle"],
-    "chair": ["chair", "dining chair", "office chair", "seat"],
+    "chair": ["chair", "dining chair", "office chair"],
     "table": ["table", "desk", "dining table", "coffee table", "work table"],
     "bed": ["bed", "twin bed", "single bed", "bed frame", "mattress frame"],
     "stool": ["stool", "bar stool", "ottoman"],
@@ -501,7 +502,7 @@ COMPOUND_ALIASES = {
     "lamp": ["lamp", "desk lamp", "table lamp", "lamp base"],
     "goblet": ["goblet", "wine glass", "chalice"],
     "dumbbell": ["dumbbell", "hand weight", "barbell weight"],
-    "picture_frame": ["picture frame", "photo frame", "frame"],
+    "picture_frame": ["picture frame", "photo frame"],
     "coaster": ["coaster", "drink coaster", "cup coaster"],
     "plate": ["plate", "dinner plate", "dish plate"],
 }
@@ -531,7 +532,11 @@ def apply_compound_defaults(params: dict) -> dict:
 
 
 def match_compound_keyword(prompt: str) -> Optional[str]:
-    """Cheap offline fallback: detect a compound name in free text."""
+    """Cheap offline fallback: detect a compound name in free text.
+
+    Aliases match whole words only, so "return" does not become a vase ("urn")
+    and "framework" does not become a picture frame.
+    """
     text = (prompt or "").lower()
     # longer aliases first to prefer "water bottle" over "bottle" alone if both present
     ranked = []
@@ -540,6 +545,6 @@ def match_compound_keyword(prompt: str) -> Optional[str]:
             ranked.append((len(a), a, key))
     ranked.sort(reverse=True)
     for _, alias, key in ranked:
-        if alias in text:
+        if re.search(r"\b" + re.escape(alias) + r"\b", text):
             return key
     return None

@@ -92,6 +92,16 @@ ALIAS_FIX = {
     "photo_frame": "picture_frame",
 }
 
+_PRIMITIVES = {
+    "box", "cylinder", "hollow_cylinder", "sphere", "hemisphere",
+    "cone", "torus", "prism", "pyramid", "star",
+}
+
+_PRIMITIVE_WORD = re.compile(
+    r"\b(box|cube|block|cuboid|brick|cylinder|rod|dowel|pillar|sphere|ball|globe|"
+    r"cone|torus|prism|pyramid|star|hemisphere|dome|pipe|tube)\b"
+)
+
 
 def _cache_key(prompt: str) -> str:
     return hashlib.sha1(prompt.strip().lower().encode("utf-8")).hexdigest()
@@ -159,6 +169,48 @@ def _mm_from_match(num: str, unit: str = "mm") -> float:
     return v
 
 
+def _labeled_mm(low: str, words: tuple) -> Optional[float]:
+    alt = "|".join(words)
+    m = re.search(rf"(\d+(?:\.\d+)?)\s*(mm|cm|m|in|inch|inches)?\s*(?:{alt})\b", low)
+    if not m:
+        return None
+    return _mm_from_match(m.group(1), m.group(2) or "mm")
+
+
+def _apply_compound_counts(params: dict, low: str, compound: str) -> dict:
+    """Pull '4 shelves' / '3 legs' out of a prompt the heuristic would otherwise ignore."""
+    shelves = re.search(r"(\d+)\s*shel(?:f|ves)\b", low)
+    if shelves and compound == "bookshelf":
+        params["shelf_count"] = int(shelves.group(1))
+    legs = re.search(r"(\d+)\s*legs?\b", low)
+    if legs and compound == "stool":
+        params["leg_count"] = int(legs.group(1))
+    return params
+
+
+def _box_from_text(low: str) -> Optional[dict]:
+    w = _labeled_mm(low, ("wide", "width"))
+    h = _labeled_mm(low, ("tall", "high", "height"))
+    d = _labeled_mm(low, ("deep", "depth"))
+    if w is None and h is None and d is None:
+        dims = re.findall(r"(\d+(?:\.\d+)?)\s*(mm|cm|m|in|inch|inches)?", low)
+        if len(dims) < 3:
+            return None
+        # Unlabeled triples are width × depth × height.
+        w = _mm_from_match(dims[0][0], dims[0][1] or "mm")
+        d = _mm_from_match(dims[1][0], dims[1][1] or "mm")
+        h = _mm_from_match(dims[2][0], dims[2][1] or "mm")
+    elif w is None or h is None or d is None:
+        return None
+    return {
+        "shape": "box",
+        "width_mm": w, "height_mm": h, "depth_mm": d,
+        "_understood_as": "box", "_confidence": "high",
+        "_clarified_as": f"box {w}×{d}×{h}mm (W×D×H, heuristic)",
+        "_pipeline": "heuristic",
+    }
+
+
 def _heuristic_params(user_prompt: str) -> Optional[dict]:
     """
     Zero-LLM path for common, well-structured prompts.
@@ -172,8 +224,9 @@ def _heuristic_params(user_prompt: str) -> Optional[dict]:
         "hole", "bolt", "fillet", "chamfer", "shell", "hollow", "engrave",
         "emboss", "grid", "pattern", "text", "logo", "name",
     )
-    # Allow simple compounds without those markers
-    compound = match_compound_keyword(low)
+    # Allow simple compounds without those markers.
+    # An explicit primitive word ("box", "cylinder", …) wins over a substring alias.
+    compound = None if _PRIMITIVE_WORD.search(low) else match_compound_keyword(low)
     if compound and not any(m in low for m in complex_markers):
         params = {"shape": compound, **COMPOUND_DEFAULTS.get(compound, {})}
         # Pull a leading height/diameter if present: "water bottle 220mm tall"
@@ -183,6 +236,7 @@ def _heuristic_params(user_prompt: str) -> Optional[dict]:
         m = re.search(r"(\d+(?:\.\d+)?)\s*(mm|cm|m|in)?\s*(wide|width)", low)
         if m and "width_mm" in COMPOUND_DEFAULTS.get(compound, {}):
             params["width_mm"] = _mm_from_match(m.group(1), m.group(2) or "mm")
+        params = _apply_compound_counts(params, low, compound)
         params = apply_compound_defaults(params)
         params["_understood_as"] = compound
         params["_confidence"] = "high"
@@ -193,29 +247,20 @@ def _heuristic_params(user_prompt: str) -> Optional[dict]:
     if any(m in low for m in complex_markers):
         return None
 
-    # box 50x30x20 or "box 50mm wide 30mm tall 20mm deep"
+    # box 50x30x20 (W×D×H) or "box 50mm wide, 60mm deep, 40mm tall"
     if re.search(r"\b(box|cube|block|cuboid|brick)\b", low):
-        dims = re.findall(r"(\d+(?:\.\d+)?)\s*(mm|cm|m|in)?", low)
-        if len(dims) >= 3:
-            w = _mm_from_match(dims[0][0], dims[0][1] or "mm")
-            # Heuristic order: wide, tall/high, deep — else W×D×H as listed
-            h = _mm_from_match(dims[1][0], dims[1][1] or "mm")
-            d = _mm_from_match(dims[2][0], dims[2][1] or "mm")
-            if "tall" in low or "high" in low:
-                # wide, tall, deep ordering common in prompts
-                pass
-            return {
-                "shape": "box",
-                "width_mm": w, "height_mm": h, "depth_mm": d,
-                "_understood_as": "box", "_confidence": "high",
-                "_clarified_as": f"box {w}×{d}×{h}mm (heuristic)",
-                "_pipeline": "heuristic",
-            }
+        boxed = _box_from_text(low)
+        if boxed:
+            return boxed
 
     if re.search(r"\b(cylinder|rod|dowel|pillar)\b", low):
-        dia = re.search(r"(\d+(?:\.\d+)?)\s*(mm|cm|m|in)?\s*(diameter|ø|dia)?", low)
-        ht = re.search(r"(\d+(?:\.\d+)?)\s*(mm|cm|m|in)?\s*(tall|high|height|long)", low)
-        nums = re.findall(r"(\d+(?:\.\d+)?)\s*(mm|cm|m|in)?", low)
+        dia = re.search(
+            r"(\d+(?:\.\d+)?)\s*(mm|cm|m|in|inch|inches)?\s*(?:diameter|ø|dia)\b", low
+        )
+        ht = re.search(
+            r"(\d+(?:\.\d+)?)\s*(mm|cm|m|in|inch|inches)?\s*(?:tall|high|height|long)\b", low
+        )
+        nums = re.findall(r"(\d+(?:\.\d+)?)\s*(mm|cm|m|in|inch|inches)?", low)
         if dia and ht:
             return {
                 "shape": "cylinder",
@@ -224,7 +269,7 @@ def _heuristic_params(user_prompt: str) -> Optional[dict]:
                 "_understood_as": "cylinder", "_confidence": "high",
                 "_clarified_as": "cylinder (heuristic)", "_pipeline": "heuristic",
             }
-        if len(nums) >= 2:
+        if dia is None and ht is None and len(nums) >= 2:
             return {
                 "shape": "cylinder",
                 "diameter_mm": _mm_from_match(nums[0][0], nums[0][1] or "mm"),
@@ -252,6 +297,7 @@ def _offline_compound_params(user_prompt: str) -> Optional[dict]:
     if not key:
         return None
     params = {"shape": key, **COMPOUND_DEFAULTS.get(key, {})}
+    params = _apply_compound_counts(params, (user_prompt or "").lower(), key)
     params["_understood_as"] = key
     params["_confidence"] = "medium"
     params["_clarified_as"] = f"{key.replace('_', ' ')} (default proportions from prompt: {user_prompt})"
@@ -267,9 +313,10 @@ def _finalize(params: dict, user_prompt: str) -> dict:
     if shape in COMPOUND_BUILDERS:
         params.pop("missing_fields", None)
         params = apply_compound_defaults(params)
-    else:
+    elif shape not in _PRIMITIVES:
+        # Only fill in a compound when the model did not already pick a real primitive.
         kw = match_compound_keyword(user_prompt)
-        if kw and shape not in COMPOUND_BUILDERS:
+        if kw:
             params["shape"] = kw
             params.pop("missing_fields", None)
             params = apply_compound_defaults(params)
@@ -422,6 +469,35 @@ def _local_edit(prev: dict, edit: str) -> Optional[dict]:
     m = re.search(r"(?:make (?:it )?|add )?(\d+(?:\.\d+)?)\s*mm\s*(?:shorter|smaller height)", low)
     if m and "height_mm" in out:
         out["height_mm"] = max(float(out["height_mm"]) - float(m.group(1)), 0.5)
+        out["_clarified_as"] = f"height -{m.group(1)}mm (local edit)"
+        out["_pipeline"] = "local_edit"
+        return out
+
+    m = re.search(r"(?:make (?:it )?|add )?(\d+(?:\.\d+)?)\s*mm\s*wider", low)
+    if m and "width_mm" in out:
+        out["width_mm"] = float(out["width_mm"]) + float(m.group(1))
+        out["_clarified_as"] = f"width +{m.group(1)}mm (local edit)"
+        out["_pipeline"] = "local_edit"
+        return out
+
+    m = re.search(r"(?:make (?:it )?|add )?(\d+(?:\.\d+)?)\s*mm\s*(?:narrower|less wide)", low)
+    if m and "width_mm" in out:
+        out["width_mm"] = max(float(out["width_mm"]) - float(m.group(1)), 0.5)
+        out["_clarified_as"] = f"width -{m.group(1)}mm (local edit)"
+        out["_pipeline"] = "local_edit"
+        return out
+
+    m = re.search(r"(?:make (?:it )?|add )?(\d+(?:\.\d+)?)\s*mm\s*deeper", low)
+    if m and "depth_mm" in out:
+        out["depth_mm"] = float(out["depth_mm"]) + float(m.group(1))
+        out["_clarified_as"] = f"depth +{m.group(1)}mm (local edit)"
+        out["_pipeline"] = "local_edit"
+        return out
+
+    m = re.search(r"(?:make (?:it )?|add )?(\d+(?:\.\d+)?)\s*mm\s*(?:shallower|less deep)", low)
+    if m and "depth_mm" in out:
+        out["depth_mm"] = max(float(out["depth_mm"]) - float(m.group(1)), 0.5)
+        out["_clarified_as"] = f"depth -{m.group(1)}mm (local edit)"
         out["_pipeline"] = "local_edit"
         return out
 
@@ -440,6 +516,13 @@ def _local_edit(prev: dict, edit: str) -> Optional[dict]:
     m = re.search(r"(?:set |make )?diameter\s*(?:to |= )?(\d+(?:\.\d+)?)\s*mm", low)
     if m and "diameter_mm" in out:
         out["diameter_mm"] = float(m.group(1))
+        out["_pipeline"] = "local_edit"
+        return out
+
+    m = re.search(r"(?:set |make )?depth\s*(?:to |= )?(\d+(?:\.\d+)?)\s*mm", low)
+    if m and "depth_mm" in out:
+        out["depth_mm"] = float(m.group(1))
+        out["_clarified_as"] = f"depth = {m.group(1)}mm (local edit)"
         out["_pipeline"] = "local_edit"
         return out
 
