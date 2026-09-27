@@ -38,6 +38,7 @@
   <nav class="tabs" role="tablist">
     <button type="button" class="tab active" data-tab="design" onclick="switchTab('design')">Design</button>
     <button type="button" class="tab" data-tab="engineer" onclick="switchTab('engineer')">Beam Engineer</button>
+    <button type="button" class="tab" data-tab="workshop" onclick="switchTab('workshop')">Workshop</button>
   </nav>
 
   <main class="workspace">
@@ -78,6 +79,10 @@
           <label>Raw CAD parameters (JSON) — bypasses the language model</label>
           <textarea id="json-input" rows="10" spellcheck="false"
             placeholder='{"shape":"box","width_mm":50,"depth_mm":30,"height_mm":20}'></textarea>
+          <div class="row-inline">
+            <label class="inline-label">Material if JSON omits it</label>
+            <select id="json-material"></select>
+          </div>
           <button type="button" id="json-generate-btn" class="btn-primary" onclick="generateManual()">Generate from JSON</button>
         </div>
 
@@ -150,6 +155,78 @@
           <div id="beam-result" class="result-box hidden"></div>
         </div>
       </section>
+
+      <!-- WORKSHOP TAB -->
+      <section id="tab-workshop" class="tab-panel">
+        <div class="card">
+          <label>Scale &amp; duplicate</label>
+          <p class="help">Uniform scale keeps hole spacing in proportion. Clone opens a new session from the current part.</p>
+          <div class="form-grid">
+            <label>Scale factor<input type="number" id="scale-factor" value="2" min="0.01" max="100" step="0.1"></label>
+          </div>
+          <div class="btn-row">
+            <button type="button" class="btn-primary" onclick="scaleModel()">Scale part</button>
+            <button type="button" class="btn-ghost" onclick="cloneModel()">Clone</button>
+          </div>
+        </div>
+
+        <div class="card">
+          <label>Metric bolt circle</label>
+          <p class="help">Applies a clearance or tap hole pattern to the current part.</p>
+          <div class="form-grid">
+            <label>Fastener<select id="fastener-select"></select></label>
+            <label>Count<input type="number" id="bolt-count" value="6" min="1" max="48"></label>
+            <label>Pitch Ø mm<input type="number" id="bolt-pitch" placeholder="auto" min="1" step="0.1"></label>
+            <label>Hole
+              <select id="bolt-type">
+                <option value="clearance">Clearance</option>
+                <option value="tap">Tap</option>
+              </select>
+            </label>
+            <label>Face
+              <select id="bolt-face">
+                <option value="top">Top</option>
+                <option value="bottom">Bottom</option>
+                <option value="front">Front</option>
+                <option value="back">Back</option>
+              </select>
+            </label>
+          </div>
+          <button type="button" class="btn-primary" onclick="applyBoltCircle()">Apply bolt circle</button>
+        </div>
+
+        <div class="card">
+          <label>Material cost compare</label>
+          <p class="help">Same solid, priced across the material catalog. Does not change the current material.</p>
+          <button type="button" class="btn-primary" onclick="compareMaterials()">Compare materials</button>
+          <div id="compare-result" class="result-box hidden"></div>
+        </div>
+
+        <div class="card">
+          <label>Part library</label>
+          <p class="help">Save the current design by name and load it later.</p>
+          <div class="row-inline">
+            <input type="text" id="library-name" placeholder="Part name" style="flex:1">
+            <button type="button" class="btn-primary" onclick="saveToLibrary()">Save</button>
+          </div>
+          <div id="library-list" class="list-stack"></div>
+        </div>
+
+        <div class="card">
+          <label>Bill of materials</label>
+          <p class="help">Add the current part, set a quantity, then total weight and cost.</p>
+          <div class="form-grid">
+            <label>Qty<input type="number" id="bom-qty" value="1" min="1" step="1"></label>
+            <label>Description<input type="text" id="bom-desc" placeholder="optional"></label>
+          </div>
+          <div class="btn-row">
+            <button type="button" class="btn-primary" onclick="addBomLine()">Add current part</button>
+            <button type="button" class="btn-ghost" onclick="clearBom()">Clear</button>
+          </div>
+          <div id="bom-lines" class="list-stack"></div>
+          <div id="bom-result" class="result-box hidden"></div>
+        </div>
+      </section>
     </aside>
 
     <section class="panel-right">
@@ -178,7 +255,7 @@
             <button type="button" class="mat-btn" onclick="setMaterial(0.0, 0.85, this)">Rubber</button>
             <button type="button" class="mat-btn" onclick="setMaterial(0.35, 0.7, this)">Matte</button>
             <span class="sep"></span>
-            <button type="button" class="mat-btn" id="auto-rotate-btn" onclick="toggleAutoRotate()">Auto-rotate</button>
+            <button type="button" class="mat-btn active" id="auto-rotate-btn" onclick="toggleAutoRotate()">Auto-rotate</button>
             <button type="button" class="mat-btn" onclick="resetCamera()">Reset view</button>
           </div>
         </div>
@@ -218,6 +295,6 @@
     </section>
   </main>
 
-  <script src="app.js?v=10"></script>
+  <script src="app.js?v=11"></script>
 </body>
 </html>

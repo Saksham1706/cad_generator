@@ -176,11 +176,15 @@ def _get_wp(base, shape, face_name, p):
 
 
 def _cut_circles_at(wp, centers, dia, depth):
+    """Cut circles at face-center offsets.
+
+    Workplane.center() returns a new plane and does not move `wp`. Re-centering
+    by the inverse offset was shifting every hole after the first.
+    """
     tool = None
     for (x, y) in centers:
         c = wp.center(x, y).circle(dia / 2).extrude(-abs(depth), combine=False)
         tool = c.val() if tool is None else tool.fuse(c.val())
-        wp = wp.center(-x, -y)  # reset workplane origin
     return tool
 
 
@@ -189,7 +193,6 @@ def _cut_rects_at(wp, centers, side, depth):
     for (x, y) in centers:
         c = wp.center(x, y).rect(side, side).extrude(-abs(depth), combine=False)
         tool = c.val() if tool is None else tool.fuse(c.val())
-        wp = wp.center(-x, -y)
     return tool
 
 
